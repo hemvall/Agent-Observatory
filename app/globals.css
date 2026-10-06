@@ -2643,4 +2643,280 @@ h1 {
     gap: 8px;
   }
 }
-.avatar-loading{position:relative;z-index:2;max-width:100%;display:grid;place-items:center;color:#92a3b6;font-size:12px}
+.avatar-loading {
+  position: relative;
+  z-index: 2;
+  max-width: 100%;
+  display: grid;
+  place-items: center;
+  color: #92a3b6;
+  font-size: 12px;
+}
+
+/* Evidence review is part of the approval flow, not hidden in raw tool JSON. */
+.mission-briefing {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid #313d48;
+  background: #172029;
+  border-radius: 7px;
+  padding: 15px;
+  margin-top: 18px;
+}
+.briefing-icon {
+  color: #b9d8f1;
+  padding-top: 3px;
+}
+.mission-briefing strong {
+  font-size: 15px;
+  font-weight: 550;
+}
+.mission-briefing p {
+  color: #a2b0c0;
+  font-size: 14px;
+  margin-top: 4px;
+}
+.mission-briefing.completed {
+  background: #19251b;
+  border-color: #364d36;
+}
+.mission-briefing.completed .briefing-icon {
+  color: var(--lime);
+}
+.mission-briefing.waiting {
+  background: #29231b;
+  border-color: #5f4b31;
+}
+.mission-briefing.waiting .briefing-icon {
+  color: #ffc082;
+}
+.mission-briefing.failed {
+  border-color: #623538;
+}
+.connection-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border: 1px solid #6b5637;
+  background: #2d251c;
+  border-radius: 7px;
+  color: #f0ce9b;
+  font-size: 14px;
+}
+.approval-banner {
+  flex-wrap: wrap;
+}
+.approval-banner > div {
+  flex: 1;
+  min-width: 230px;
+}
+.approval-banner .button {
+  margin-left: 0;
+}
+.control-buttons {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.findings-panel {
+  margin-top: 20px;
+  padding: 23px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 10px;
+  scroll-margin-top: 24px;
+}
+.findings-panel:focus {
+  outline: 2px solid var(--lime);
+  outline-offset: 3px;
+}
+.findings-panel .section-title {
+  flex-wrap: wrap;
+}
+.findings-count {
+  color: var(--muted);
+  font-size: 14px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.findings-intro {
+  font-size: 14px;
+  color: #a5b1c1;
+  margin: 15px 0;
+  line-height: 1.7;
+}
+.findings-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 17px;
+}
+.findings-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #394554;
+  background: #0f151e;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #a8b7c8;
+}
+.findings-search:focus-within {
+  border-color: var(--lime);
+}
+.findings-search input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 11px 0;
+  color: var(--text);
+  font-size: 14px;
+}
+.findings-toolbar select {
+  max-width: 100%;
+  border: 1px solid #394554;
+  background: #0f151e;
+  color: var(--text);
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.findings-results {
+  display: grid;
+  gap: 12px;
+}
+.finding-card {
+  padding: 18px;
+  background: #171e27;
+  border: 1px solid #33404e;
+  border-left: 3px solid #a6b6f5;
+  border-radius: 7px;
+  min-width: 0;
+}
+.finding-card.warning {
+  border-left-color: #efbb78;
+}
+.finding-card.critical {
+  border-left-color: #f49e9e;
+}
+.finding-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 11px;
+  flex-wrap: wrap;
+}
+.finding-level {
+  font-size: 12px;
+  border: 1px solid #4b5677;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #252d42;
+  color: #c5ceff;
+}
+.finding-level.warning {
+  border-color: #675336;
+  background: #352b1e;
+  color: #ffd194;
+}
+.finding-level.critical {
+  border-color: #78464b;
+  background: #382229;
+  color: #ffb6b6;
+}
+.finding-ref-count {
+  color: #a0adbe;
+  font-size: 12px;
+}
+.finding-card h3 {
+  font-size: 17px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.finding-card > p {
+  font-size: 16px;
+  line-height: 1.7;
+  color: #c0c9d5;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.finding-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+.finding-evidence button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #465466;
+  border-radius: 5px;
+  background: #212c3a;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: #d3e3f3;
+  max-width: 100%;
+  min-width: 0;
+}
+.finding-evidence button:hover {
+  border-color: var(--lime);
+  background: #26372b;
+}
+.finding-evidence code {
+  font-size: 12px;
+  color: #b5d994;
+  flex-shrink: 0;
+}
+.finding-evidence button > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  text-align: left;
+}
+.findings-empty {
+  padding: 30px 12px;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  color: #afbdd0;
+  font-size: 14px;
+}
+.findings-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  color: #a0b393;
+  margin-top: 18px;
+}
+.findings-note svg {
+  margin-top: 3px;
+}
+@media (max-width: 600px) {
+  .findings-panel {
+    padding: 17px;
+  }
+  .findings-toolbar {
+    flex-direction: column;
+  }
+  .finding-card {
+    padding: 15px;
+  }
+  .approval-banner > div {
+    min-width: 0;
+    flex-basis: calc(100% - 44px);
+  }
+  .approval-banner .button {
+    width: 100%;
+    justify-content: center;
+  }
+  .control-buttons {
+    justify-content: flex-start;
+  }
+}

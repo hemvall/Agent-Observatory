@@ -9,8 +9,10 @@ The characters are the actual procedural avatars from [hemvall/avatar-lab](https
 1. Choose an example audit, a public GitHub repository, or your own document.
 2. Launch the mission. Inspect a character, a tool trace, or a collected source.
 3. Pause and resume, or disable automatic progression and advance one step at a time.
-4. Review the findings and references. Approve the final report.
+4. Read the finding cards, filter by severity or search, and open their cited sources. Approve the final report.
 5. Download the report, traces or full mission. Compare two saved executions.
+
+The mission briefing explains the current step and the next action. Interrupted connections show a stale-state notice and stop automatic progression until polling recovers. Reuse a paused or finished mission to prepare the same input for another run, without changing its saved history.
 
 The interface is in French. The **Comment ça marche** view explains the runtime and its limits.
 

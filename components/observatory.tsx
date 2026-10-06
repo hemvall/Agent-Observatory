@@ -21,6 +21,7 @@ import {
   Plus,
   Radio,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Square,
@@ -29,6 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AgentAvatar, AVATAR_NAMES } from "./agent-avatar";
+import { FindingsPanel } from "./findings-panel";
 import {
   AGENTS,
   PHASES,
@@ -115,6 +117,69 @@ function Report({ text }: { text: string }) {
     </article>
   );
 }
+function MissionBriefing({
+  run,
+  auto,
+  advancing,
+}: {
+  run: Run;
+  auto: boolean;
+  advancing: boolean;
+}) {
+  const phase = PHASES[Math.min(run.cursor, PHASES.length - 1)];
+  const role = AGENTS.find((agent) => agent.id === phase.agent)!;
+  const text =
+    run.status === "completed"
+      ? {
+          title: "Le rapport est prêt.",
+          detail:
+            "Retrouvez le livrable et les preuves dans l’onglet Livrables.",
+        }
+      : run.status === "waiting"
+        ? {
+            title: "Votre accord est attendu.",
+            detail:
+              "Relisez les constats ci-dessous, puis autorisez la rédaction du rapport.",
+          }
+        : run.status === "failed"
+          ? {
+              title: `Étape interrompue : ${phase.name.toLocaleLowerCase("fr")}.`,
+              detail:
+                "Les étapes terminées restent sauvegardées. Reprendre réessaie cette étape, sans recommencer la mission.",
+            }
+          : run.status === "cancelled"
+            ? {
+                title: "Mission annulée.",
+                detail:
+                  "Ses sources et ses traces restent consultables. Réutilisez son contenu pour préparer une nouvelle exécution.",
+              }
+            : run.status === "paused"
+              ? {
+                  title: `En pause avant « ${phase.name} ».`,
+                  detail: "Reprendre continuera depuis ce checkpoint.",
+                }
+              : {
+                  title: `${advancing ? "En cours" : "Prochaine étape"} : ${phase.name.toLocaleLowerCase("fr")}.`,
+                  detail: `${role.role} · ${phase.description} ${auto ? "L’enchaînement automatique nécessite cette page ouverte." : "Cliquez sur Étape suivante pour avancer."}`,
+                };
+  return (
+    <div className={`mission-briefing ${run.status}`} role="status">
+      <span className="briefing-icon">
+        {run.status === "completed" ? (
+          <CheckCheck size={19} />
+        ) : run.status === "waiting" ? (
+          <ShieldCheck size={19} />
+        ) : (
+          <Activity size={19} />
+        )}
+      </span>
+      <div>
+        <strong>{text.title}</strong>
+        <p>{text.detail}</p>
+      </div>
+    </div>
+  );
+}
 export default function Observatory() {
   const [tab, setTab] = useState<Tab>("mission");
   const [run, setRun] = useState<Run | null>(null);
@@ -132,6 +197,7 @@ export default function Observatory() {
   const [busy, setBusy] = useState(false);
   const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [connectionLost, setConnectionLost] = useState(false);
   const [error, setError] = useState("");
   const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
   const [source, setSource] = useState<Source | null>(null);
@@ -143,38 +209,48 @@ export default function Observatory() {
   const sourceTrigger = useRef<HTMLElement | null>(null);
   const inspectionRef = useRef<Run | null>(null);
   const selectedId = useRef<string | null>(null);
+  const navigationVersion = useRef(0);
   const inFlight = useRef(new Set<string>());
   const mounted = useRef(true);
   function receive(next: Run) {
     if (selectedId.current !== next.id) return;
     setRun((prev) =>
-      prev?.id === next.id && prev.revision > next.revision ? prev : next,
+      prev?.id === next.id && prev.revision >= next.revision ? prev : next,
     );
   }
   async function refreshHistory() {
-    const data = await api("/api/runs");
-    if (mounted.current) setHistory(data.runs);
+    try {
+      const data = await api("/api/runs");
+      if (mounted.current) setHistory(data.runs);
+    } catch {
+      // Keep the last saved list on a transient network failure.
+    }
   }
   async function openRun(id: string) {
+    navigationVersion.current++;
     selectedId.current = id;
+    setRun(null);
+    setConnectionLost(false);
     setLoading(true);
     setError("");
     setReplay(-1);
     setSelectedTrace(null);
     try {
       const data = await api(`/api/runs/${id}`);
+      if (selectedId.current !== id || !mounted.current) return;
       receive(data.run);
       setTab("mission");
       window.history.replaceState(null, "", `?run=${id}`);
     } catch (e) {
-      setError((e as Error).message);
+      if (selectedId.current === id) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (selectedId.current === id) setLoading(false);
     }
   }
   useEffect(() => {
     mounted.current = true;
     let active = true;
+    const initialNavigation = navigationVersion.current;
     (async () => {
       try {
         const [h, c] = await Promise.all([
@@ -185,27 +261,40 @@ export default function Observatory() {
         setHistory(h.runs);
         setLiveEnabled(c.liveEnabled);
         setModel(c.model);
-        const saved = localStorage.getItem("observatory-avatar-preferences");
-        if (saved) {
-          try {
+        try {
+          const saved = localStorage.getItem("observatory-avatar-preferences");
+          if (saved) {
             const prefs = JSON.parse(saved);
-            if (prefs && typeof prefs === "object") setAvatars(prefs);
-          } catch {
-            /* invalid device preference */
+            if (prefs && typeof prefs === "object") {
+              setAvatars(
+                Object.fromEntries(
+                  AGENTS.flatMap((agent) =>
+                    AVATAR_NAMES.includes(prefs[agent.id])
+                      ? [[agent.id, prefs[agent.id]]]
+                      : [],
+                  ),
+                ),
+              );
+            }
           }
+        } catch {
+          // Optional device preferences must never prevent mission loading.
         }
         const query = new URLSearchParams(window.location.search).get("run");
+        if (navigationVersion.current !== initialNavigation) return;
         const id =
-          h.runs.find((r: Summary) => r.id === query)?.id || h.runs[0]?.id;
+          query && /^[0-9a-f-]{36}$/i.test(query) ? query : h.runs[0]?.id;
         if (id) {
           selectedId.current = id;
           const data = await api(`/api/runs/${id}`);
           if (active) receive(data.run);
         }
       } catch (e) {
-        if (active) setError((e as Error).message);
+        if (active && navigationVersion.current === initialNavigation)
+          setError((e as Error).message);
       } finally {
-        if (active) setLoading(false);
+        if (active && navigationVersion.current === initialNavigation)
+          setLoading(false);
       }
     })();
     return () => {
@@ -220,9 +309,12 @@ export default function Observatory() {
     const timer = setInterval(async () => {
       try {
         const data = await api(`/api/runs/${id}`);
-        if (active) receive(data.run);
+        if (active) {
+          receive(data.run);
+          setConnectionLost(false);
+        }
       } catch {
-        /* poll will retry; mutations display errors */
+        if (active) setConnectionLost(true);
       }
     }, 2500);
     return () => {
@@ -234,6 +326,7 @@ export default function Observatory() {
     if (
       !run ||
       !auto ||
+      connectionLost ||
       run.status !== "running" ||
       inFlight.current.has(run.id)
     )
@@ -244,7 +337,14 @@ export default function Observatory() {
       Math.max(1400, run.lockedUntil - Date.now() + 100),
     );
     return () => clearTimeout(timer);
-  }, [run?.id, run?.revision, run?.status, run?.lockedUntil, auto]);
+  }, [
+    run?.id,
+    run?.revision,
+    run?.status,
+    run?.lockedUntil,
+    auto,
+    connectionLost,
+  ]);
   useEffect(() => {
     if (!source) return;
     function close(e: KeyboardEvent) {
@@ -337,6 +437,7 @@ export default function Observatory() {
       return;
     }
     let active = true;
+    setCompareRun(null);
     api(`/api/runs/${compareId}`)
       .then((d) => {
         if (active) setCompareRun(d.run);
@@ -349,7 +450,7 @@ export default function Observatory() {
     };
   }, [compareId]);
   async function advance(id: string) {
-    if (inFlight.current.has(id)) return;
+    if (selectedId.current !== id || inFlight.current.has(id)) return;
     inFlight.current.add(id);
     setAdvancingId(id);
     try {
@@ -357,7 +458,10 @@ export default function Observatory() {
       receive(data.run);
       void refreshHistory();
     } catch (e) {
-      if ((e as { status?: number }).status !== 409)
+      if (
+        selectedId.current === id &&
+        (e as { status?: number }).status !== 409
+      )
         setError((e as Error).message);
       try {
         receive((await api(`/api/runs/${id}`)).run);
@@ -376,10 +480,10 @@ export default function Observatory() {
     setError("");
     try {
       receive((await api(`/api/runs/${id}`, { action: name })).run);
-      setReplay(-1);
+      if (selectedId.current === id) setReplay(-1);
       void refreshHistory();
     } catch (e) {
-      setError((e as Error).message);
+      if (selectedId.current === id) setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -387,6 +491,7 @@ export default function Observatory() {
   async function launch() {
     if (busy) return;
     setBusy(true);
+    const navigation = ++navigationVersion.current;
     setError("");
     try {
       const data = await api("/api/runs", {
@@ -396,6 +501,8 @@ export default function Observatory() {
         document: documentText,
         mode,
       });
+      void refreshHistory();
+      if (navigationVersion.current !== navigation) return;
       selectedId.current = data.run.id;
       setRun(data.run);
       setReplay(-1);
@@ -403,20 +510,33 @@ export default function Observatory() {
       setAuto(true);
       setTab("mission");
       window.history.replaceState(null, "", `?run=${data.run.id}`);
-      void refreshHistory();
     } catch (e) {
-      setError((e as Error).message);
+      if (navigationVersion.current === navigation)
+        setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
   function newMission() {
+    navigationVersion.current++;
     selectedId.current = null;
     setRun(null);
     setError("");
     setReplay(-1);
     setTab("mission");
+    setLoading(false);
+    setConnectionLost(false);
+    setSelectedTrace(null);
     window.history.replaceState(null, "", window.location.pathname);
+  }
+  function duplicateMission() {
+    if (!run) return;
+    setScenario(run.scenario);
+    setObjective(run.objective);
+    setRepository(run.repository);
+    setDocumentText(run.document);
+    setMode(run.mode === "live" && !liveEnabled ? "demo" : run.mode);
+    newMission();
   }
   function chooseScenario(id: Run["scenario"]) {
     setScenario(id);
@@ -425,10 +545,14 @@ export default function Observatory() {
   function customize(name: string) {
     const prefs = { ...avatars, [selectedAgent]: name };
     setAvatars(prefs);
-    localStorage.setItem(
-      "observatory-avatar-preferences",
-      JSON.stringify(prefs),
-    );
+    try {
+      localStorage.setItem(
+        "observatory-avatar-preferences",
+        JSON.stringify(prefs),
+      );
+    } catch {
+      // The current choice still works when browser storage is disabled.
+    }
   }
   const advancing = run?.id === advancingId;
   const displayedSources = replay < 0 || replay >= 1 ? run?.sources || [] : [];
@@ -652,6 +776,13 @@ export default function Observatory() {
               sauvegardées…
             </div>
           )}
+          {connectionLost && run && (
+            <div className="connection-banner" role="status">
+              <Radio size={17} />
+              Connexion interrompue. L’état affiché est le dernier état reçu ;
+              l’actualisation reprend automatiquement.
+            </div>
+          )}
           {tab === "mission" && (
             <>
               <section className="mission-panel">
@@ -727,6 +858,20 @@ export default function Observatory() {
                             <FileText size={15} /> Voir le rapport
                           </button>
                         )}
+                        {[
+                          "completed",
+                          "cancelled",
+                          "paused",
+                          "failed",
+                        ].includes(run.status) && (
+                          <button
+                            className="button secondary"
+                            onClick={duplicateMission}
+                            disabled={busy}
+                          >
+                            <RotateCcw size={15} /> Réutiliser la mission
+                          </button>
+                        )}
                         {!["completed", "cancelled"].includes(run.status) && (
                           <button
                             className="icon-button"
@@ -740,6 +885,11 @@ export default function Observatory() {
                         )}
                       </div>
                     </div>
+                    <MissionBriefing
+                      run={run}
+                      auto={auto}
+                      advancing={advancing}
+                    />
                     {run.error && <p className="inline-error">{run.error}</p>}
                     {run.status === "waiting" && (
                       <div className="approval-banner">
@@ -753,6 +903,27 @@ export default function Observatory() {
                             autorisez la rédaction du rapport.
                           </p>
                         </div>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            setReplay(-1);
+                            requestAnimationFrame(() => {
+                              const panel =
+                                document.getElementById("mission-findings");
+                              panel?.focus({ preventScroll: true });
+                              panel?.scrollIntoView({
+                                behavior: window.matchMedia(
+                                  "(prefers-reduced-motion: reduce)",
+                                ).matches
+                                  ? "instant"
+                                  : "smooth",
+                                block: "start",
+                              });
+                            });
+                          }}
+                        >
+                          <Search size={16} /> Relire les constats
+                        </button>
                         <button
                           className="button primary"
                           disabled={busy}
@@ -1067,6 +1238,18 @@ export default function Observatory() {
                       </div>
                     )}
                   </section>
+                  {displayedFindings.length > 0 && (
+                    <FindingsPanel
+                      key={run?.id}
+                      findings={displayedFindings}
+                      sources={displayedSources}
+                      reviewing={run?.status === "waiting"}
+                      onSource={(selected, trigger) => {
+                        sourceTrigger.current = trigger;
+                        setSource(selected);
+                      }}
+                    />
+                  )}
                 </div>
                 <aside className="inspector">
                   <div className="inspector-header">
