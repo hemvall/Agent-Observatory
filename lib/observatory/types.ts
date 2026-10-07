@@ -8,6 +8,7 @@ export type Source = {
   url?: string;
   sha?: string;
   truncated?: boolean;
+  startLine?: number;
 };
 export type Finding = {
   title: string;
@@ -55,6 +56,14 @@ export type Run = {
   model: string | null;
   provider?: "openai" | "groq";
   error: string | null;
+  analysisProgress?: {
+    sourceIndex: number;
+    offset: number;
+    budget: number;
+    completed: number;
+    retries: number;
+    nextAttemptAt: number;
+  };
 };
 export const PHASES = [
   {

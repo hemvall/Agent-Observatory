@@ -52,7 +52,7 @@ Groq utilise son propre endpoint `https://api.groq.com/openai/v1/chat/completion
 
 OpenAI reste disponible avec `AI_PROVIDER=openai`, `OPENAI_API_KEY` et `OPENAI_MODEL` (défaut : `gpt-4.1-mini`). Sans `AI_PROVIDER`, une clé Groq non vide est prioritaire, puis OpenAI. Un fournisseur explicitement sélectionné ne bascule jamais vers l’autre si sa clé manque.
 
-Pour la version hébergée, configure les mêmes variables côté serveur dans les paramètres du site ; `.dev.vars` concerne uniquement le développement local. Sans clé, le mode démo reste disponible. La présence d’une clé indique que l’IA est configurée ; sa validité est vérifiée lors du premier appel. Les erreurs de quota restent visibles et la reprise conserve les étapes terminées.
+Pour la version hébergée, configure les mêmes variables côté serveur dans les paramètres du site ; `.dev.vars` concerne uniquement le développement local. Sans clé, le mode démo reste disponible. La présence d’une clé indique que l’IA est configurée ; sa validité est vérifiée lors du premier appel. Groq reçoit des lots d’au plus 6 000 caractères, avec 3 000 tokens de sortie réservés. Un 413 réduit automatiquement la taille du lot sans supprimer le contenu restant. Chaque lot réussi sauvegarde ses constats, ses preuves et ses tokens ; la reprise repart de la position enregistrée. Entre lots, les limites Groq sont respectées via les en-têtes de réinitialisation ou une attente prudente de 65 secondes. Un 429 programme une reprise selon `Retry-After`, avec trois reprises automatiques au maximum. L’interface affiche l’attente. La synthèse décrit le premier lot, les constats couvrent tous les lots.
 
 ```sh
 pnpm typecheck
@@ -60,6 +60,8 @@ pnpm test
 pnpm source:pack
 pnpm build
 ```
+
+En local, le serveur écoute sur `http://127.0.0.1:5173` et le rechargement automatique utilise un WebSocket dédié sur le port 24678, pour éviter le proxy du Worker. Si ce port est bloqué par le pare-feu, le rechargement automatique peut échouer ; les appels IA passent par HTTP et restent indépendants.
 
 `pnpm check` runs those checks and builds the application. In ChatGPT Work, the managed preview/build scripts are selected automatically. On other machines, the portable Vinext path is used.
 

@@ -336,7 +336,11 @@ export default function Observatory() {
     const id = run.id;
     const timer = setTimeout(
       () => void advance(id),
-      Math.max(1400, run.lockedUntil - Date.now() + 100),
+      Math.max(
+        1400,
+        run.lockedUntil - Date.now() + 100,
+        (run.analysisProgress?.nextAttemptAt || 0) - Date.now() + 100,
+      ),
     );
     return () => clearTimeout(timer);
   }, [
@@ -344,6 +348,7 @@ export default function Observatory() {
     run?.revision,
     run?.status,
     run?.lockedUntil,
+    run?.analysisProgress?.nextAttemptAt,
     auto,
     connectionLost,
   ]);

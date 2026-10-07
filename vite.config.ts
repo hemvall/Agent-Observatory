@@ -67,7 +67,12 @@ export default defineConfig(async ({ command }) => {
     server: {
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }
-        : {}),
+        : {
+            host: "127.0.0.1",
+            port: 5173,
+            strictPort: true,
+            hmr: { host: "127.0.0.1", port: 24678, clientPort: 24678 },
+          }),
       ...(isCodexSeatbeltSandbox
         ? { watch: { useFsEvents: false, usePolling: true } }
         : {}),

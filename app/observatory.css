@@ -1700,3 +1700,76 @@
   font-size: 14px;
   color: var(--so-muted);
 }
+/* Left-aligned compact rows replace repeated metadata cards. */
+.so-history-list button.so-history-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px;
+  min-height: 70px;
+  text-align: left;
+}
+.so-history-row .so-history-name {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: #eef0f5;
+  text-align: left;
+}
+.so-history-row .so-history-name strong {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.so-history-row .so-history-name small {
+  font-size: 12px;
+  color: #9da4b5;
+  text-align: left;
+}
+.so-history-row .so-history-status {
+  display: flex;
+  color: #b0b7ca;
+}
+.so-history-row.history-completed .so-history-status {
+  color: #d6fb96;
+}
+.so-history-row.history-failed .so-history-status {
+  color: #f8a7a7;
+}
+.so-history-row.history-waiting .so-history-status {
+  color: #efcf89;
+}
+.so-history-row time {
+  font-size: 12px;
+  color: #adb4c4;
+  font-variant-numeric: tabular-nums;
+}
+.so-history-list {
+  gap: 4px;
+}
+.so-library input {
+  outline: none;
+}
+.so-library input:focus-visible {
+  border-color: var(--so-accent);
+  box-shadow: 0 0 0 2px #d6fb9620;
+}
+.so-batch-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  margin: 16px 0;
+  background: #d6fb9608;
+  border: 1px solid #d6fb9640;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.so-batch-status small {
+  color: var(--so-muted);
+  font-size: 13px;
+}

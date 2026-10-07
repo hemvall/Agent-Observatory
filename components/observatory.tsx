@@ -10,6 +10,9 @@ import {
 } from "react";
 import {
   ArrowRight,
+  CircleCheck,
+  CircleAlert,
+  Clock3,
   Check,
   CheckCheck,
   ChevronDown,
@@ -40,7 +43,10 @@ import {
 } from "@/lib/observatory/types";
 import { SCENARIOS } from "@/lib/observatory/fixtures";
 const TechnicalView = lazy(() => import("./technical-observatory"));
-type Summary = Pick<Run, "id" | "title" | "status" | "mode" | "updatedAt">;
+type Summary = Pick<
+  Run,
+  "id" | "title" | "status" | "mode" | "updatedAt" | "scenario"
+>;
 type InputKind = "example" | "repository" | "documents";
 const JOBS = [
   "Organise le travail",
@@ -194,29 +200,34 @@ function Team({
     run && ["running", "waiting", "failed"].includes(run.status)
       ? PHASES[cursor].agent
       : null;
+  const quotaWait =
+    run?.status === "running" &&
+    (run.analysisProgress?.nextAttemptAt || 0) > Date.now();
   const completed = run?.status === "completed";
   const sleepy = run?.status === "paused" || run?.status === "cancelled";
-  const title = !run
-    ? "L’équipe attend ton premier contenu."
-    : completed
-      ? "Analyse terminée. À toi de jouer."
-      : run.status === "waiting"
-        ? "Une dernière décision t’appartient."
-        : run.status === "paused"
-          ? "Petite pause. On reprend quand tu veux."
-          : run.status === "failed"
-            ? "Une étape a rencontré un problème."
-            : run.status === "cancelled"
-              ? "Mission arrêtée. Les résultats sont conservés."
-              : [
-                  "On organise le travail.",
-                  "On lit les documents.",
-                  "On relève les points à vérifier.",
-                  "On vérifie les références.",
-                  "Ton accord est attendu.",
-                  "On assemble ton rapport.",
-                  "On vérifie le rapport.",
-                ][cursor];
+  const title = quotaWait
+    ? "On attend le renouvellement du quota Groq."
+    : !run
+      ? "L’équipe attend ton premier contenu."
+      : completed
+        ? "Analyse terminée. À toi de jouer."
+        : run.status === "waiting"
+          ? "Une dernière décision t’appartient."
+          : run.status === "paused"
+            ? "Petite pause. On reprend quand tu veux."
+            : run.status === "failed"
+              ? "Une étape a rencontré un problème."
+              : run.status === "cancelled"
+                ? "Mission arrêtée. Les résultats sont conservés."
+                : [
+                    "On organise le travail.",
+                    "On lit les documents.",
+                    "On relève les points à vérifier.",
+                    "On vérifie les références.",
+                    "Ton accord est attendu.",
+                    "On assemble ton rapport.",
+                    "On vérifie le rapport.",
+                  ][cursor];
   function interact(id: string) {
     setSelected(id);
     setGreet(id);
@@ -249,7 +260,7 @@ function Team({
       </div>
       <div className="so-team">
         {AGENTS.map((agent, index) => {
-          const active = current === agent.id;
+          const active = current === agent.id && !quotaWait;
           const done =
             completed ||
             (Boolean(run?.traces.some((trace) => trace.agent === agent.id)) &&
@@ -401,6 +412,97 @@ export default function Observatory() {
     <Workspace onTechnical={() => setTechnical(true)} />
   );
 }
+function HistoryRow({
+  item,
+  active,
+  onOpen,
+}: {
+  item: Summary;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  const [owner, project] =
+    item.scenario === "repository" && item.title.includes("/")
+      ? item.title.split(/\/(.+)/)
+      : ["", item.title];
+  const Icon =
+    item.status === "completed"
+      ? CircleCheck
+      : item.status === "failed"
+        ? CircleAlert
+        : item.status === "paused"
+          ? Pause
+          : item.status === "waiting"
+            ? Clock3
+            : item.status === "running"
+              ? Loader2
+              : Square;
+  const date = new Date(item.updatedAt);
+  const today = date.toDateString() === new Date().toDateString();
+  return (
+    <button
+      className={`so-history-row history-${item.status}`}
+      aria-current={active ? "page" : undefined}
+      onClick={onOpen}
+      title={`${item.title} · ${STATUS_LABEL[item.status]} · ${item.mode === "demo" ? "Exemple sans IA" : "Analyse IA"} · ${date.toLocaleString("fr-FR")}`}
+    >
+      <span className="so-history-status">
+        <Icon
+          size={18}
+          className={item.status === "running" ? "spin" : ""}
+          aria-hidden="true"
+        />
+        <span className="sr-only">{STATUS_LABEL[item.status]}</span>
+      </span>
+      <span className="so-history-name">
+        <strong>{project}</strong>
+        <small>
+          {owner || (item.mode === "demo" ? "Exemple" : "Document")}
+          {item.mode === "demo" && owner ? " · Démo" : ""}
+        </small>
+      </span>
+      <time dateTime={item.updatedAt}>
+        {date.toLocaleString(
+          "fr-FR",
+          today
+            ? { hour: "2-digit", minute: "2-digit" }
+            : { day: "2-digit", month: "2-digit" },
+        )}
+      </time>
+    </button>
+  );
+}
+function BatchStatus({ run }: { run: Run }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const progress = run.analysisProgress;
+  if (!progress || run.cursor !== 2) return null;
+  const seconds = Math.max(0, Math.ceil((progress.nextAttemptAt - now) / 1000));
+  return (
+    <p className="so-batch-status" role="timer">
+      <strong>
+        {progress.completed} lot{progress.completed > 1 ? "s" : ""} sauvegardé
+        {progress.completed > 1 ? "s" : ""}
+      </strong>
+      <span>
+        {run.status === "paused"
+          ? "En pause."
+          : run.status === "failed"
+            ? "Analyse interrompue."
+            : seconds
+              ? `Quota Groq : reprise dans ${seconds} s.`
+              : "Analyse du prochain lot…"}
+      </span>
+      <small>
+        Le contenu est traité par petits lots. Tu peux mettre en pause sans
+        perdre les lots terminés.
+      </small>
+    </p>
+  );
+}
 function Workspace({ onTechnical }: { onTechnical: () => void }) {
   const [kind, setKind] = useState<InputKind>("repository");
   const [example, setExample] = useState("architecture");
@@ -541,10 +643,21 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
     // Give each saved step time to be understood; this is UI pacing, not tool latency.
     const timer = setTimeout(
       () => void advance(id),
-      Math.max(3600, run.lockedUntil - Date.now() + 100),
+      Math.max(
+        3600,
+        run.lockedUntil - Date.now() + 100,
+        (run.analysisProgress?.nextAttemptAt || 0) - Date.now() + 100,
+      ),
     );
     return () => clearTimeout(timer);
-  }, [run?.id, run?.revision, run?.status, run?.lockedUntil, offline]);
+  }, [
+    run?.id,
+    run?.revision,
+    run?.status,
+    run?.lockedUntil,
+    run?.analysisProgress?.nextAttemptAt,
+    offline,
+  ]);
   useEffect(() => {
     inspection.current = run;
   }, [run]);
@@ -774,26 +887,12 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
                   .includes(historyQuery.toLocaleLowerCase("fr")),
               )
               .map((item) => (
-                <button
+                <HistoryRow
                   key={item.id}
-                  aria-current={run?.id === item.id ? "page" : undefined}
-                  onClick={() => void open(item.id)}
-                >
-                  <strong>{item.title}</strong>
-                  <span>
-                    {STATUS_LABEL[item.status]} ·{" "}
-                    {item.mode === "demo" ? "Exemple sans IA" : "Analyse IA"}
-                  </span>
-                  <small>
-                    {new Date(item.updatedAt).toLocaleString("fr-FR", {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    · {item.id.slice(0, 6)}
-                  </small>
-                </button>
+                  item={item}
+                  active={run?.id === item.id}
+                  onOpen={() => void open(item.id)}
+                />
               ))}
             {!history.length && (
               <p>Tes analyses sauvegardées apparaîtront ici.</p>
@@ -1073,6 +1172,7 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
                   <span className={`so-status status-${run.status}`}>
                     {STATUS_LABEL[run.status]}
                   </span>
+                  <BatchStatus run={run} />
                   <ol className="so-steps">
                     {STEP_NAMES.map((name, index) => (
                       <li
@@ -1267,7 +1367,7 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
                     disabled={busy}
                     onClick={() => void act("resume")}
                   >
-                    <Play size={17} /> Reprendre la finalisation
+                    <Play size={17} /> Reprendre
                   </button>
                 )}
                 {run.status === "running" && run.cursor >= 5 && (
@@ -1281,6 +1381,16 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
                 <p className="so-alert" role="alert">
                   {run.error}
                 </p>
+              )}
+              {run.analysisProgress && run.cursor === 2 && (
+                <>
+                  <p className="so-connect-notice">
+                    Résultat partiel : les lots terminés sont visibles
+                    ci-dessous. L’analyse doit continuer pour examiner le reste
+                    du contenu.
+                  </p>
+                  <BatchStatus run={run} />
+                </>
               )}
               {run.mode === "demo" && (
                 <p className="so-connect-notice">
