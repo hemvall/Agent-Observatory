@@ -85,10 +85,13 @@ const ROLES = [
   },
 ];
 const TABS = [
-  { id: "build" as const, label: "Atelier", icon: Layers3 },
-  { id: "play" as const, label: "Tester", icon: Play },
-  { id: "evaluate" as const, label: "Évaluer", icon: FlaskConical },
-  { id: "compare" as const, label: "Comparer", icon: GitCompareArrows },
+  { id: "build" as const, label: "Documents", icon: FileText },
+  { id: "play" as const, label: "Poser une question", icon: Play },
+  {
+    id: "evaluate" as const,
+    label: "Vérifier les réponses",
+    icon: FlaskConical,
+  },
 ];
 const faultNames = {
   none: "Conditions normales",
@@ -334,7 +337,7 @@ function Outcome({
         </span>
         {["failed", "completed"].includes(job.status) && (
           <button className="wl-btn quiet" onClick={onTest}>
-            <Plus size={15} /> Transformer en test
+            <Plus size={15} /> Enregistrer cette question comme test
           </button>
         )}
       </div>
@@ -553,9 +556,7 @@ export default function WorkLab() {
       provider: string;
       model: string;
     }>({ liveEnabled: false, provider: "groq", model: "" }),
-    [question, setQuestion] = useState(
-      "Quel est le délai de résiliation du contrat ?",
-    ),
+    [question, setQuestion] = useState(""),
     [role, setRole] = useState<"public" | "internal">("public"),
     [fault, setFault] = useState<TestCase["fault"]>("none"),
     [caseIds, setCaseIds] = useState<string[]>([]),
@@ -615,6 +616,7 @@ export default function WorkLab() {
     setVersionId(v.id);
     setVersionDraft(structuredClone(v));
     setDocId(p.documents[0]?.id || "");
+    setQuestion(p.tests[0]?.question || "");
     setCaseIds(p.tests.slice(0, 12).map((t) => t.id));
     setCompareA(p.versions[0].id);
     setCompareB(p.versions.length > 1 ? v.id : "");
@@ -967,6 +969,34 @@ export default function WorkLab() {
       setTab("evaluate");
     }
   }
+  const readyToTest =
+    !!draft?.documents.length &&
+    draft.documents.every((d) => d.title.trim() && d.text.trim());
+  async function continueToQuestion() {
+    if (!draft?.documents.length) {
+      addDocument();
+      requestAnimationFrame(() =>
+        document.getElementById("wl-document-content")?.focus(),
+      );
+      return;
+    }
+    if (!readyToTest) {
+      const missing = draft.documents.find(
+        (d) => !d.title.trim() || !d.text.trim(),
+      );
+      if (missing) setDocId(missing.id);
+      setError(
+        "Ajoute un titre et du contenu à chaque document pour continuer.",
+      );
+      requestAnimationFrame(() =>
+        document.getElementById("wl-document-content")?.focus(),
+      );
+      return;
+    }
+    if (dirty && !(await save())) return;
+    setTab("play");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
   const selectedDocument = draft?.documents.find((d) => d.id === docId);
   const models =
     config.provider === "groq"
@@ -1097,8 +1127,9 @@ export default function WorkLab() {
               Vérifie son comportement.
             </h1>
             <p>
-              Configure ses documents et ses agents, inspecte ses réponses, puis
-              compare tes versions sur les mêmes tests.
+              Ajoute tes documents, pose une question et vérifie la réponse. Les
+              agents se chargent automatiquement de la recherche et des
+              contrôles.
             </p>
             <div className="wl-starters">
               <button onClick={() => void create(true)} disabled={busy}>
@@ -1166,55 +1197,95 @@ export default function WorkLab() {
                     >
                       Abandonner
                     </button>
-                    <button
-                      className="wl-btn primary"
-                      disabled={busy}
-                      onClick={() => void save()}
-                    >
-                      <Save size={16} />
-                      {versionDirty
-                        ? `Enregistrer V${project.versions.length + 1}`
-                        : "Enregistrer"}
-                    </button>
                   </>
                 )}
-                <a
-                  className={`wl-btn quiet ${dirty ? "disabled" : ""}`}
-                  href={
-                    dirty
-                      ? undefined
-                      : `/api/lab/projects/${project.id}/export?version=${versionId}`
-                  }
-                  aria-disabled={dirty}
-                >
-                  <Download size={16} /> Exporter l’assistant
-                </a>
               </div>
             </header>
-            <nav className="wl-tabs" aria-label="Espace de travail">
-              {TABS.map((t) => (
+            <div
+              className="wl-tabs"
+              role="navigation"
+              aria-label="Parcours de l’assistant"
+            >
+              {TABS.map((t, index) => (
                 <button
                   key={t.id}
                   aria-current={tab === t.id ? "page" : undefined}
                   onClick={() => setTab(t.id)}
                 >
-                  <t.icon size={17} />
+                  <span className="wl-step-number">{index + 1}</span>
                   {t.label}
                 </button>
               ))}
-            </nav>
+              {project.versions.length > 1 && (
+                <button
+                  className="wl-compare-shortcut"
+                  aria-current={tab === "compare" ? "page" : undefined}
+                  onClick={() => setTab("compare")}
+                >
+                  <GitCompareArrows size={16} /> Comparer les versions
+                </button>
+              )}
+            </div>
             {dirty && (
               <p className="wl-draft-notice">
-                Modifications non enregistrées. Les expériences utilisent
-                uniquement la dernière configuration sauvegardée.
+                Modifications non enregistrées.
+                {tab !== "build" && !project.documents.length && (
+                  <div className="wl-banner">
+                    <FileText size={18} />
+                    <span>
+                      Ajoute d’abord un document pour que l’assistant puisse
+                      chercher une réponse.
+                    </span>
+                    <button
+                      className="wl-btn quiet"
+                      onClick={() => setTab("build")}
+                    >
+                      Ajouter mes documents
+                    </button>
+                  </div>
+                )}
+                {tab !== "build" && (
+                  <button
+                    className="wl-btn primary"
+                    disabled={busy}
+                    onClick={() => void save()}
+                  >
+                    Enregistrer pour continuer
+                  </button>
+                )}
               </p>
+            )}
+            {tab !== "build" && (
+              <div className="wl-step-heading">
+                <span className="wl-eyebrow">
+                  {tab === "play"
+                    ? "ÉTAPE 2"
+                    : tab === "evaluate"
+                      ? "ÉTAPE 3"
+                      : "COMPARAISON"}
+                </span>
+                <h2>
+                  {tab === "play"
+                    ? "Pose une question à tes documents"
+                    : tab === "evaluate"
+                      ? "Est-ce que ton assistant répond correctement ?"
+                      : "Quelle version répond le mieux ?"}
+                </h2>
+                <p>
+                  {tab === "play"
+                    ? "Écris ta question, lance le test et consulte la réponse avec ses sources."
+                    : tab === "evaluate"
+                      ? "Un test associe une question à ce que tu attends de la réponse. Lance les tests pour repérer les erreurs."
+                      : "Les deux versions reçoivent exactement les mêmes questions et documents."}
+                </p>
+              </div>
             )}
             {tab === "build" ? (
               <div className="wl-builder">
                 <section className="wl-card wl-corpus">
                   <div className="wl-section-head">
                     <h2>
-                      <FileText size={18} /> Documents
+                      <FileText size={18} /> Les textes de référence
                     </h2>
                     <button
                       className="wl-icon"
@@ -1225,6 +1296,10 @@ export default function WorkLab() {
                       <Plus size={18} />
                     </button>
                   </div>
+                  <p className="wl-muted">
+                    Ajoute les informations dans lesquelles l’assistant devra
+                    chercher ses réponses.
+                  </p>
                   <div className="wl-document-list">
                     {draft.documents.map((d) => (
                       <button
@@ -1270,6 +1345,7 @@ export default function WorkLab() {
                       <label>
                         Contenu
                         <textarea
+                          id="wl-document-content"
                           rows={11}
                           value={selectedDocument.text}
                           maxLength={20000}
@@ -1319,7 +1395,15 @@ export default function WorkLab() {
                   ) : (
                     <div className="wl-small-empty">
                       <FileText size={30} />
-                      <p>Ajoute les textes que ton assistant devra utiliser.</p>
+                      <p>
+                        Commence par un texte : FAQ, procédure ou documentation.
+                      </p>
+                      <button
+                        className="wl-btn primary"
+                        onClick={() => addDocument()}
+                      >
+                        <Plus size={16} /> Ajouter mon premier document
+                      </button>
                     </div>
                   )}
                   <label className="wl-import">
@@ -1347,211 +1431,282 @@ export default function WorkLab() {
                       }}
                     />
                   </label>
-                  <small>
-                    Les accès sont des rôles de test. La recherche filtre les
-                    documents avant de les envoyer au modèle.
-                  </small>
+                  <details className="wl-advanced">
+                    <summary>À propos des accès public et interne</summary>
+                    <p>
+                      Les accès sont des rôles de test. La recherche filtre les
+                      documents avant de les envoyer au modèle.
+                    </p>
+                  </details>
                 </section>
                 <div className="wl-configuration">
-                  <section className="wl-card">
-                    <div className="wl-section-head">
-                      <h2>
-                        <Layers3 size={18} /> Ton workflow documentaire
-                      </h2>
-                      <span className="wl-tag">4 étapes</span>
+                  <section className="wl-card wl-next-action">
+                    <span className="wl-eyebrow">ÉTAPE 1 · DOCUMENTS</span>
+                    <h2>
+                      {!draft.documents.length
+                        ? "Donne une base à ton assistant"
+                        : readyToTest
+                          ? "Tes documents sont prêts à être interrogés"
+                          : "Complète ton document"}
+                    </h2>
+                    <p>
+                      {!draft.documents.length
+                        ? "Ajoute ou importe un texte dans le panneau de gauche. Une configuration par défaut est déjà prête."
+                        : readyToTest
+                          ? "Tu peux maintenant poser une question. L’assistant cherchera dans ces textes et montrera les passages utilisés."
+                          : "Renseigne un titre et du contenu pour chaque document avant de passer à ta première question."}
+                    </p>
+                    <div className="wl-readiness">
+                      <FileText size={18} />
+                      <span>
+                        {draft.documents.length} document
+                        {draft.documents.length > 1 ? "s" : ""} ·{" "}
+                        {dirty ? "modifications à enregistrer" : "enregistrés"}
+                      </span>
                     </div>
-                    <Agents
-                      version={versionDraft}
-                      busy={false}
-                      paused={false}
-                      onAgent={setSelectedAgent}
-                    />
-                    <div className="wl-agent-editor">
-                      <div>
-                        <strong>
-                          {ROLES.find((a) => a.id === selectedAgent)?.name}
-                        </strong>
-                        <p>
-                          {
-                            ROLES.find((a) => a.id === selectedAgent)
-                              ?.description
-                          }
-                        </p>
-                      </div>
-                      <label>
-                        Personnage
-                        <select
-                          value={versionDraft.avatars[selectedAgent]}
-                          onChange={(e) =>
-                            setVersionDraft({
-                              ...versionDraft,
-                              avatars: {
-                                ...versionDraft.avatars,
-                                [selectedAgent]: e.target.value,
-                              },
-                            })
-                          }
-                        >
-                          {AVATAR_NAMES.map((name) => (
-                            <option key={name}>{name}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                  </section>
-                  <section className="wl-card">
-                    <div className="wl-section-head">
-                      <h2>
-                        <Settings2 size={18} /> Configuration de{" "}
-                        {savedVersion?.name}
-                      </h2>
-                      <span className="wl-tag">Version figée</span>
-                    </div>
-                    <label>
-                      Consignes de réponse
-                      <textarea
-                        rows={4}
-                        value={versionDraft.prompt}
-                        maxLength={2000}
-                        onChange={(e) =>
-                          setVersionDraft({
-                            ...versionDraft,
-                            prompt: e.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <div className="wl-two">
-                      <label>
-                        Modèle
-                        <select
-                          value={versionDraft.model}
-                          onChange={(e) =>
-                            setVersionDraft({
-                              ...versionDraft,
-                              model: e.target.value,
-                            })
-                          }
-                        >
-                          <option value="">Modèle du serveur</option>
-                          {models.map((m) => (
-                            <option key={m}>{m}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Passages récupérés
-                        <select
-                          value={versionDraft.topK}
-                          onChange={(e) =>
-                            setVersionDraft({
-                              ...versionDraft,
-                              topK: Number(e.target.value),
-                            })
-                          }
-                        >
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <option key={n} value={n}>
-                              {n} passage{n > 1 ? "s" : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <details className="wl-advanced">
-                      <summary>Limites et réglages de recherche</summary>
-                      <div className="wl-two">
-                        <label>
-                          Seuil de correspondance
-                          <input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={versionDraft.minimumScore}
-                            onChange={(e) =>
-                              setVersionDraft({
-                                ...versionDraft,
-                                minimumScore: Number(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          Tokens de sortie maximum
-                          <input
-                            type="number"
-                            min={400}
-                            max={1800}
-                            step={100}
-                            value={versionDraft.maxTokens}
-                            onChange={(e) =>
-                              setVersionDraft({
-                                ...versionDraft,
-                                maxTokens: Number(e.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-                      <p>
-                        Recherche lexicale, sans embeddings. Le modèle doit
-                        citer des extraits exacts ; sans contexte autorisé, le
-                        workflow s’abstient sans appel IA.
+                    <button
+                      className="wl-btn primary"
+                      disabled={busy}
+                      onClick={() => void continueToQuestion()}
+                    >
+                      {busy ? (
+                        <Loader2 size={17} className="spin" />
+                      ) : (
+                        <Play size={17} />
+                      )}{" "}
+                      {!draft.documents.length
+                        ? "Ajouter un document"
+                        : !readyToTest
+                          ? "Compléter le document"
+                          : dirty
+                            ? "Enregistrer et poser une question"
+                            : "Poser ma première question"}
+                    </button>
+                    <p className="wl-next-hint">
+                      Les agents s’activent automatiquement pendant le test. Tu
+                      n’as pas à lancer leurs étapes une par une.
+                    </p>
+                    {!config.liveEnabled && (
+                      <p className="wl-local-hint">
+                        Sans clé IA, le test affiche les extraits trouvés.
+                        Connecte Groq dans l’étape suivante pour obtenir une
+                        réponse rédigée.
                       </p>
-                    </details>
-                    <div className="wl-config-actions">
-                      <button
-                        className="wl-btn primary"
-                        disabled={busy || !dirty}
-                        onClick={() => void save()}
-                      >
-                        <Save size={16} /> Enregistrer{" "}
-                        {versionDirty
-                          ? `V${project.versions.length + 1}`
-                          : "le projet"}
-                      </button>
-                      <button
-                        className="wl-btn quiet"
-                        disabled={
-                          busy || dirty || project.versions.length >= 12
-                        }
-                        onClick={() => void save(draft, true)}
-                      >
-                        <Copy size={16} /> Dupliquer {savedVersion?.name}
-                      </button>
-                      <button
-                        className="wl-btn quiet"
-                        onClick={() => setTab("play")}
-                      >
-                        Tester la version <ChevronRight size={16} />
-                      </button>
+                    )}
+                  </section>
+                  <details className="wl-setup-options">
+                    <summary>
+                      <Settings2 size={17} />
+                      <span>
+                        Réglages de l’assistant
+                        <small>
+                          Consignes, recherche, modèle et personnages ·
+                          facultatif
+                        </small>
+                      </span>
+                    </summary>
+                    <div className="wl-setup-body">
+                      <section className="wl-card">
+                        <div className="wl-section-head">
+                          <h2>
+                            <Layers3 size={18} /> L’équipe de ton assistant
+                          </h2>
+                          <span className="wl-tag">Automatique</span>
+                        </div>
+                        <Agents
+                          version={versionDraft}
+                          busy={false}
+                          paused={false}
+                          onAgent={setSelectedAgent}
+                        />
+                        <div className="wl-agent-editor">
+                          <div>
+                            <strong>
+                              {ROLES.find((a) => a.id === selectedAgent)?.name}
+                            </strong>
+                            <p>
+                              {
+                                ROLES.find((a) => a.id === selectedAgent)
+                                  ?.description
+                              }
+                            </p>
+                          </div>
+                          <label>
+                            Personnage
+                            <select
+                              value={versionDraft.avatars[selectedAgent]}
+                              onChange={(e) =>
+                                setVersionDraft({
+                                  ...versionDraft,
+                                  avatars: {
+                                    ...versionDraft.avatars,
+                                    [selectedAgent]: e.target.value,
+                                  },
+                                })
+                              }
+                            >
+                              {AVATAR_NAMES.map((name) => (
+                                <option key={name}>{name}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      </section>
+                      <section className="wl-card">
+                        <div className="wl-section-head">
+                          <h2>
+                            <Settings2 size={18} /> Configuration de{" "}
+                            {savedVersion?.name}
+                          </h2>
+                          <span className="wl-tag">Version figée</span>
+                        </div>
+                        <label>
+                          Consignes de réponse
+                          <textarea
+                            rows={4}
+                            value={versionDraft.prompt}
+                            maxLength={2000}
+                            onChange={(e) =>
+                              setVersionDraft({
+                                ...versionDraft,
+                                prompt: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <div className="wl-two">
+                          <label>
+                            Modèle
+                            <select
+                              value={versionDraft.model}
+                              onChange={(e) =>
+                                setVersionDraft({
+                                  ...versionDraft,
+                                  model: e.target.value,
+                                })
+                              }
+                            >
+                              <option value="">Modèle du serveur</option>
+                              {models.map((m) => (
+                                <option key={m}>{m}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Passages récupérés
+                            <select
+                              value={versionDraft.topK}
+                              onChange={(e) =>
+                                setVersionDraft({
+                                  ...versionDraft,
+                                  topK: Number(e.target.value),
+                                })
+                              }
+                            >
+                              {[1, 2, 3, 4, 5].map((n) => (
+                                <option key={n} value={n}>
+                                  {n} passage{n > 1 ? "s" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <details className="wl-advanced">
+                          <summary>Limites et réglages de recherche</summary>
+                          <div className="wl-two">
+                            <label>
+                              Seuil de correspondance
+                              <input
+                                type="number"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={versionDraft.minimumScore}
+                                onChange={(e) =>
+                                  setVersionDraft({
+                                    ...versionDraft,
+                                    minimumScore: Number(e.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                            <label>
+                              Tokens de sortie maximum
+                              <input
+                                type="number"
+                                min={400}
+                                max={1800}
+                                step={100}
+                                value={versionDraft.maxTokens}
+                                onChange={(e) =>
+                                  setVersionDraft({
+                                    ...versionDraft,
+                                    maxTokens: Number(e.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <p>
+                            Recherche lexicale, sans embeddings. Le modèle doit
+                            citer des extraits exacts ; sans contexte autorisé,
+                            le workflow s’abstient sans appel IA.
+                          </p>
+                        </details>
+                        <div className="wl-config-actions">
+                          <button
+                            className="wl-btn primary"
+                            disabled={busy || !dirty}
+                            onClick={() => void save()}
+                          >
+                            <Save size={16} /> Enregistrer{" "}
+                            {versionDirty
+                              ? `V${project.versions.length + 1}`
+                              : "le projet"}
+                          </button>
+                          <button
+                            className="wl-btn quiet"
+                            disabled={
+                              busy || dirty || project.versions.length >= 12
+                            }
+                            onClick={() => void save(draft, true)}
+                          >
+                            <Copy size={16} /> Dupliquer {savedVersion?.name}
+                          </button>
+                          <button
+                            className="wl-btn quiet"
+                            onClick={() => void continueToQuestion()}
+                          >
+                            Poser une question
+                          </button>
+                        </div>
+                      </section>
+                      <section className="wl-card wl-project-settings">
+                        <label>
+                          Nom du projet
+                          <input
+                            value={draft.name}
+                            maxLength={100}
+                            onChange={(e) =>
+                              setDraft({ ...draft, name: e.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Objectif
+                          <textarea
+                            rows={2}
+                            value={draft.goal}
+                            maxLength={1000}
+                            onChange={(e) =>
+                              setDraft({ ...draft, goal: e.target.value })
+                            }
+                            placeholder="Ce que l’assistant doit permettre de faire"
+                          />
+                        </label>
+                      </section>
                     </div>
-                  </section>
-                  <section className="wl-card wl-project-settings">
-                    <label>
-                      Nom du projet
-                      <input
-                        value={draft.name}
-                        maxLength={100}
-                        onChange={(e) =>
-                          setDraft({ ...draft, name: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Objectif
-                      <textarea
-                        rows={2}
-                        value={draft.goal}
-                        maxLength={1000}
-                        onChange={(e) =>
-                          setDraft({ ...draft, goal: e.target.value })
-                        }
-                        placeholder="Ce que l’assistant doit permettre de faire"
-                      />
-                    </label>
-                  </section>
+                  </details>
                 </div>
               </div>
             ) : (
@@ -1630,9 +1785,8 @@ export default function WorkLab() {
                 </div>
                 {mode === "local" ? (
                   <p className="wl-mode-note">
-                    Sans IA : les passages sont extraits et les critères sont
-                    vérifiés. Les consignes de génération et le choix du modèle
-                    n’affectent pas ce mode.
+                    Mode lecture : affiche les extraits pertinents, sans
+                    génération IA.
                   </p>
                 ) : (
                   <p className="wl-mode-note">
@@ -1664,7 +1818,8 @@ export default function WorkLab() {
                           <label>
                             Question à ton assistant
                             <textarea
-                              rows={2}
+                              placeholder="Ex. : quelle est la procédure de résiliation ?"
+                              rows={3}
                               value={question}
                               minLength={5}
                               maxLength={1000}
@@ -1672,50 +1827,60 @@ export default function WorkLab() {
                               onChange={(e) => setQuestion(e.target.value)}
                             />
                           </label>
-                          <div className="wl-play-controls">
-                            <label>
-                              Accès simulé
-                              <select
-                                value={role}
-                                onChange={(e) =>
-                                  setRole(
-                                    e.target.value as "public" | "internal",
-                                  )
-                                }
-                              >
-                                <option value="public">Public</option>
-                                <option value="internal">Interne</option>
-                              </select>
-                            </label>
-                            <label>
-                              Situation
-                              <select
-                                value={fault}
-                                onChange={(e) =>
-                                  setFault(e.target.value as TestCase["fault"])
-                                }
-                              >
-                                {Object.entries(faultNames).map(
-                                  ([id, label]) => (
-                                    <option key={id} value={id}>
-                                      {label}
-                                    </option>
-                                  ),
-                                )}
-                              </select>
-                            </label>
-                            <button
-                              className="wl-btn primary"
-                              disabled={
-                                busy ||
-                                dirty ||
-                                exp?.status === "running" ||
-                                !project.documents.length
-                              }
-                            >
-                              <Play size={17} /> Tester {savedVersion?.name}
-                            </button>
-                          </div>
+                          <details className="wl-question-options">
+                            <summary>
+                              Tester des accès ou des situations particulières
+                            </summary>
+                            <div className="wl-play-controls">
+                              <label>
+                                Accès simulé
+                                <select
+                                  value={role}
+                                  onChange={(e) =>
+                                    setRole(
+                                      e.target.value as "public" | "internal",
+                                    )
+                                  }
+                                >
+                                  <option value="public">Public</option>
+                                  <option value="internal">Interne</option>
+                                </select>
+                              </label>
+                              <label>
+                                Situation
+                                <select
+                                  value={fault}
+                                  onChange={(e) =>
+                                    setFault(
+                                      e.target.value as TestCase["fault"],
+                                    )
+                                  }
+                                >
+                                  {Object.entries(faultNames).map(
+                                    ([id, label]) => (
+                                      <option key={id} value={id}>
+                                        {label}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                              </label>
+                            </div>
+                          </details>
+                          <button
+                            className="wl-btn primary"
+                            disabled={
+                              busy ||
+                              dirty ||
+                              exp?.status === "running" ||
+                              !project.documents.length
+                            }
+                          >
+                            <Play size={17} />{" "}
+                            {mode === "local"
+                              ? "Rechercher dans mes documents"
+                              : "Obtenir une réponse"}
+                          </button>
                         </form>
                       </section>
                       <div
@@ -1730,7 +1895,17 @@ export default function WorkLab() {
                             </span>
                           </p>
                         )}
-                        {shownVersion && (
+                        {exp?.kind !== "playground" && (
+                          <div className="wl-answer-placeholder">
+                            <FileText size={26} />
+                            <h3>Ta réponse apparaîtra ici</h3>
+                            <p>
+                              Lance une question pour voir les agents
+                              travailler, puis consulte les passages utilisés.
+                            </p>
+                          </div>
+                        )}
+                        {shownVersion && exp?.kind === "playground" && (
                           <Agents
                             version={shownVersion}
                             job={
@@ -1777,6 +1952,26 @@ export default function WorkLab() {
                                 setTestEditor(blankTest(currentJob))
                               }
                             />
+                            {exp.status === "completed" && (
+                              <div className="wl-after-answer">
+                                <strong>
+                                  La réponse te convient ? Vérifie qu’elle tient
+                                  aussi sur d’autres questions.
+                                </strong>
+                                <button
+                                  className="wl-btn quiet"
+                                  onClick={() => {
+                                    setTab("evaluate");
+                                    window.scrollTo({
+                                      top: 0,
+                                      behavior: "smooth",
+                                    });
+                                  }}
+                                >
+                                  Vérifier les réponses
+                                </button>
+                              </div>
+                            )}
                           </>
                         )}
                       </div>
@@ -1798,7 +1993,7 @@ export default function WorkLab() {
                           </p>
                         </div>
                         <button
-                          className="wl-btn quiet"
+                          className={`wl-btn ${!draft.tests.length ? "primary" : "quiet"}`}
                           disabled={busy}
                           onClick={() => setTestEditor(blankTest())}
                         >
@@ -1841,9 +2036,9 @@ export default function WorkLab() {
                       )}
                       {!draft.tests.length ? (
                         <p className="wl-small-empty">
-                          Ajoute une question et le résultat attendu, ou
-                          transforme une réponse du terrain de test en cas de
-                          régression.
+                          Ajoute une question et ce que la réponse doit
+                          contenir. Tu peux aussi enregistrer une question
+                          depuis l’étape 2.
                         </p>
                       ) : (
                         <div className="wl-test-list">
@@ -1902,39 +2097,41 @@ export default function WorkLab() {
                           ))}
                         </div>
                       )}
-                      <div className="wl-eval-actions">
-                        <button
-                          className="wl-btn primary"
-                          disabled={
-                            busy ||
-                            dirty ||
-                            !caseIds.length ||
-                            exp?.status === "running" ||
-                            (tab === "compare" &&
-                              (!compareB || compareA === compareB))
-                          }
-                          onClick={() =>
-                            void start("evaluation", tab === "compare")
-                          }
-                        >
-                          <Play size={16} />
-                          {tab === "compare"
-                            ? "Comparer"
-                            : "Évaluer " + savedVersion?.name}
-                        </button>
-                        <span>
-                          {caseIds.length} cas ·{" "}
-                          {tab === "compare"
-                            ? caseIds.length * 2
-                            : caseIds.length}{" "}
-                          exécutions maximum
-                        </span>
-                      </div>
+                      {draft.tests.length > 0 && (
+                        <div className="wl-eval-actions">
+                          <button
+                            className="wl-btn primary"
+                            disabled={
+                              busy ||
+                              dirty ||
+                              !caseIds.length ||
+                              exp?.status === "running" ||
+                              (tab === "compare" &&
+                                (!compareB || compareA === compareB))
+                            }
+                            onClick={() =>
+                              void start("evaluation", tab === "compare")
+                            }
+                          >
+                            <Play size={16} />
+                            {tab === "compare"
+                              ? "Comparer"
+                              : "Lancer les tests"}
+                          </button>
+                          <span>
+                            {caseIds.length} cas ·{" "}
+                            {tab === "compare"
+                              ? caseIds.length * 2
+                              : caseIds.length}{" "}
+                            exécutions maximum
+                          </span>
+                        </div>
+                      )}
                     </section>
                     {exp?.kind === "evaluation" && (
                       <section className="wl-card wl-evaluation-results">
                         <div className="wl-section-head">
-                          <h2>Résultats de l’expérience</h2>
+                          <h2>Résultats des tests</h2>
                           <button
                             className="wl-btn quiet"
                             onClick={() =>
@@ -1982,7 +2179,55 @@ export default function WorkLab() {
                                       (n, j) =>
                                         n + j.inputTokens + j.outputTokens,
                                       0,
-                                    )}{" "}
+                                    )}
+                                    {exp?.kind === "evaluation" &&
+                                      exp.status === "completed" && (
+                                        <section className="wl-card wl-delivery">
+                                          <div>
+                                            <h2>
+                                              Garder cette version ou
+                                              l’améliorer
+                                            </h2>
+                                            <p>
+                                              Ouvre les tests ratés pour
+                                              comprendre ce qui manque. Tu peux
+                                              modifier les réglages dans
+                                              Documents, puis comparer la
+                                              nouvelle version.
+                                            </p>
+                                          </div>
+                                          <div className="wl-config-actions">
+                                            <button
+                                              className="wl-btn quiet"
+                                              onClick={() => setTab("build")}
+                                            >
+                                              Ajuster l’assistant
+                                            </button>
+                                            {project.versions.length > 1 && (
+                                              <button
+                                                className="wl-btn quiet"
+                                                onClick={() =>
+                                                  setTab("compare")
+                                                }
+                                              >
+                                                Comparer les versions
+                                              </button>
+                                            )}
+                                            <a
+                                              className={`wl-btn quiet ${dirty ? "disabled" : ""}`}
+                                              href={
+                                                dirty
+                                                  ? undefined
+                                                  : `/api/lab/projects/${project.id}/export?version=${versionId}`
+                                              }
+                                              aria-disabled={dirty}
+                                            >
+                                              <Download size={16} /> Télécharger
+                                              l’assistant {savedVersion?.name}
+                                            </a>
+                                          </div>
+                                        </section>
+                                      )}{" "}
                                     tokens ·{" "}
                                     {(
                                       jobs.reduce(

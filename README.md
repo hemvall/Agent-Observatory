@@ -4,13 +4,11 @@
 
 ## Premier parcours
 
-1. Ouvrir l’atelier et choisir l’exemple de contrats fictifs, ou créer un projet avec ses propres documents texte.
-2. Régler la recherche, le prompt, le modèle et les quatre personnages Avatar Lab. Enregistrer crée une version figée lorsque la configuration change.
-3. Poser une question dans **Tester**. Inspecter les passages utilisés, la réponse, ses citations, les outils et les tokens réellement rapportés.
-4. Transformer une réponse ratée en test en indiquant les résultats attendus et interdits. Les critères restent explicites et modifiables.
-5. Dans **Comparer**, lancer deux versions sur les mêmes tests et le même corpus figé. Inspecter chaque échec avant de choisir une version.
-6. Exporter `assistant.mjs`, autonome sous Node 24, qui réutilise exactement la recherche et les contrôles du laboratoire.
+1. **Documents** : choisir l’exemple fictif ou ajouter ses textes. Une configuration par défaut est prête. Le bouton principal enregistre les modifications et ouvre la question suivante.
+2. **Poser une question** : saisir une question et lancer le test. Les agents se chargent automatiquement des étapes ; inspecter la réponse et ses sources.
+3. **Vérifier les réponses** : enregistrer des questions avec leurs critères attendus, puis lancer les tests. Après les résultats, ajuster les réglages, comparer les versions ou télécharger l’assistant.
 
+Les réglages du prompt, du modèle, de la recherche et des personnages sont repliés dans **Réglages de l’assistant**. Les simulations d’accès et de panne restent facultatives dans la question. La comparaison apparaît comme un outil secondaire lorsque deux versions existent.
 L’exemple permet une comparaison concrète sans clé : V1 récupère un seul passage et réussit 2 tests sur 3. Une V2 avec trois passages réussit les trois tests, dont une question qui nécessite deux documents.
 
 ## Exécution et limites du laboratoire
