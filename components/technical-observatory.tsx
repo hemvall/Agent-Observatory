@@ -77,6 +77,7 @@ async function api(path: string, body?: unknown) {
     runs: Summary[];
     liveEnabled: boolean;
     model: string;
+    providerLabel?: string;
     error?: string;
   };
   if (!res.ok)
@@ -260,7 +261,8 @@ export default function Observatory() {
         if (!active) return;
         setHistory(h.runs);
         setLiveEnabled(c.liveEnabled);
-        setModel(c.model);
+        setMode(c.liveEnabled ? "live" : "demo");
+        setModel(`${c.providerLabel || "IA"} · ${c.model}`);
         try {
           const saved = localStorage.getItem("observatory-avatar-preferences");
           if (saved) {
@@ -1758,10 +1760,10 @@ export default function Observatory() {
                   ; une évaluation métier reste nécessaire.
                 </p>
                 <p>
-                  Les clés se configurent avec <code>OPENAI_API_KEY</code> et{" "}
-                  <code>OPENAI_MODEL</code>. Aucun coût estimé n’est affiché
-                  sans tarif fournisseur configuré. L’historique présente les 50
-                  dernières missions.
+                  Groq se configure avec <code>GROQ_API_KEY</code> et{" "}
+                  <code>GROQ_MODEL</code> ; OpenAI reste disponible. Aucun coût
+                  estimé n’est affiché sans tarif fournisseur configuré.
+                  L’historique présente les 50 dernières missions.
                 </p>
               </section>
             </div>

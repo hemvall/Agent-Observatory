@@ -20,10 +20,10 @@ L’historique, les exports et la reprise sont conservés. La **Vue technique**,
 
 ## Two honest execution modes
 
-| Mode               | What happens                                                                                                                                                                                   | Credentials                  |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| Deterministic demo | Real orchestration, source collection, rule-based findings, evidence checks, approval and persistence. Example scenarios use fixture documents. Repository/document scenarios read real input. | None                         |
-| Connected AI       | The analysis stage calls OpenAI for structured, source-linked findings. The same execution and verification pipeline applies.                                                                  | Server-side `OPENAI_API_KEY` |
+| Mode               | What happens                                                                                                                                                                                   | Credentials                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Deterministic demo | Real orchestration, source collection, rule-based findings, evidence checks, approval and persistence. Example scenarios use fixture documents. Repository/document scenarios read real input. | None                                           |
+| Connected AI       | The analysis stage calls Groq or OpenAI for structured, source-linked findings. The same execution and verification pipeline applies.                                                          | Server-side `GROQ_API_KEY` or `OPENAI_API_KEY` |
 
 The demo reports zero tokens. The connected mode reports provider usage. No fabricated costs, model thoughts or semantic quality scores are shown. Traces contain actual tool input/output and short operational summaries.
 
@@ -38,7 +38,21 @@ pnpm db:local
 pnpm dev
 ```
 
-For connected AI, copy `.env.example` to `.dev.vars` and set `OPENAI_API_KEY`. This is a local Worker secret file and is ignored by Git. `OPENAI_MODEL` defaults to `gpt-4.1-mini`; use a model that supports strict JSON-schema output and the Chat Completions endpoint. Without a key, live-mode creation is refused and the full demo remains available.
+Pour utiliser ta clé Groq, copie `.env.example` vers `.dev.vars` et renseigne :
+
+```dotenv
+AI_PROVIDER=groq
+GROQ_API_KEY=ta_cle_groq
+GROQ_MODEL=openai/gpt-oss-20b
+```
+
+Redémarre `pnpm dev`. La vue simple sélectionne automatiquement l’IA lorsque la clé serveur est configurée. La clé reste côté serveur, hors de Git et de l’archive source. Ne la préfixe jamais avec `NEXT_PUBLIC_`.
+
+Groq utilise son propre endpoint `https://api.groq.com/openai/v1/chat/completions`. Le modèle par défaut est `openai/gpt-oss-20b`, exécuté chez Groq. Tu peux choisir un autre modèle Groq compatible avec les sorties JSON strictes, comme `openai/gpt-oss-120b`. Voir la [documentation Groq](https://console.groq.com/docs/structured-outputs).
+
+OpenAI reste disponible avec `AI_PROVIDER=openai`, `OPENAI_API_KEY` et `OPENAI_MODEL` (défaut : `gpt-4.1-mini`). Sans `AI_PROVIDER`, une clé Groq non vide est prioritaire, puis OpenAI. Un fournisseur explicitement sélectionné ne bascule jamais vers l’autre si sa clé manque.
+
+Pour la version hébergée, configure les mêmes variables côté serveur dans les paramètres du site ; `.dev.vars` concerne uniquement le développement local. Sans clé, le mode démo reste disponible. La présence d’une clé indique que l’IA est configurée ; sa validité est vérifiée lors du premier appel. Les erreurs de quota restent visibles et la reprise conserve les étapes terminées.
 
 ```sh
 pnpm typecheck

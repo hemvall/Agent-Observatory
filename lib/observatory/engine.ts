@@ -315,7 +315,7 @@ export function evidenceChecks(run: Run): Check[] {
   ];
 }
 export function buildReport(run: Run): string {
-  return `# ${run.title}\n\n## Mission\n${run.objective}\n\nMode : ${run.mode === "demo" ? "analyse déterministe, sans appel à un modèle" : `IA (${run.model})`}.\n\n## Constats\n${run.findings.map((f) => `### ${f.title}\n${f.detail}\n\nSources : ${f.sourceIds.map((id) => `[${id}]`).join(", ")}.\n`).join("\n")}\n## Sources\n${run.sources.map((s) => `- [${s.id}] ${s.name}${s.url ? ` : ${s.url}` : ""}${s.sha ? ` (blob ${s.sha})` : ""}${s.truncated ? " [extrait limité]" : ""}`).join("\n")}\n\n## Contrôles\n${run.checks.map((c) => `- ${c.passed ? "PASS" : "FAIL"} : ${c.name}. ${c.detail}`).join("\n")}\n\n## Limites et prochaines étapes\nAudit documentaire uniquement. Aucun code, test ou commande du dépôt n’a été exécuté. Le contrôle des références ne constitue pas une validation sémantique. Confirmer les constats avec l’équipe et compléter les tests métier avant industrialisation.\n`;
+  return `# ${run.title}\n\n## Mission\n${run.objective}\n\nMode : ${run.mode === "demo" ? "analyse déterministe, sans appel à un modèle" : `IA (${run.provider === "groq" ? "Groq / " : run.provider === "openai" ? "OpenAI / " : ""}${run.model})`}.\n\n## Constats\n${run.findings.map((f) => `### ${f.title}\n${f.detail}\n\nSources : ${f.sourceIds.map((id) => `[${id}]`).join(", ")}.\n`).join("\n")}\n## Sources\n${run.sources.map((s) => `- [${s.id}] ${s.name}${s.url ? ` : ${s.url}` : ""}${s.sha ? ` (blob ${s.sha})` : ""}${s.truncated ? " [extrait limité]" : ""}`).join("\n")}\n\n## Contrôles\n${run.checks.map((c) => `- ${c.passed ? "PASS" : "FAIL"} : ${c.name}. ${c.detail}`).join("\n")}\n\n## Limites et prochaines étapes\nAudit documentaire uniquement. Aucun code, test ou commande du dépôt n’a été exécuté. Le contrôle des références ne constitue pas une validation sémantique. Confirmer les constats avec l’équipe et compléter les tests métier avant industrialisation.\n`;
 }
 const findingSchema = z.object({
   findings: z
@@ -351,12 +351,24 @@ const jsonSchema = {
     },
   },
 };
-export type ProviderConfig = { apiKey?: string; model?: string };
+export type ProviderConfig = {
+  provider?: "openai" | "groq";
+  apiKey?: string;
+  model?: string;
+};
 async function modelFindings(run: Run, config: ProviderConfig) {
   if (!config.apiKey)
     throw new RuntimeError("Le fournisseur IA n’est pas configuré.", 409);
-  const model = config.model || "gpt-4.1-mini";
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const provider = config.provider || "openai";
+  const label = provider === "groq" ? "Groq" : "OpenAI";
+  const model =
+    config.model ||
+    (provider === "groq" ? "openai/gpt-oss-20b" : "gpt-4.1-mini");
+  const endpoint =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/chat/completions"
+      : "https://api.openai.com/v1/chat/completions";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -396,7 +408,9 @@ async function modelFindings(run: Run, config: ProviderConfig) {
   });
   if (!response.ok)
     throw new RuntimeError(
-      `Le fournisseur IA a refusé la requête (HTTP ${response.status}). Vérifiez la configuration serveur.`,
+      response.status === 429
+        ? `${label} a atteint une limite de requêtes ou de tokens. Réessayez plus tard ou avec un document plus court.`
+        : `${label} a refusé la requête (HTTP ${response.status}). Vérifiez la clé, le modèle et sa prise en charge des sorties JSON structurées.`,
       502,
     );
   const data: any = await response.json();
@@ -426,6 +440,7 @@ async function modelFindings(run: Run, config: ProviderConfig) {
     );
   return {
     findings: parsed.data.findings,
+    provider,
     model,
     inputTokens: Number(data.usage?.prompt_tokens || 0),
     outputTokens: Number(data.usage?.completion_tokens || 0),
@@ -535,6 +550,9 @@ export async function executeStep(
       objective: run.objective,
       sourceIds: run.sources.map((s) => s.id),
       mode: run.mode,
+      ...(run.mode === "live"
+        ? { provider: config.provider || "openai", model: next.model }
+        : {}),
     },
     output,
     durationMs: Date.now() - started,

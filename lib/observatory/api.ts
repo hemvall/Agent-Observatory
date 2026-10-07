@@ -1,10 +1,8 @@
 import { env } from "cloudflare:workers";
 import { RuntimeError } from "./engine";
+import { resolveProvider } from "./provider";
 export function providerConfig() {
-  return {
-    apiKey: (env as unknown as Record<string, string>).OPENAI_API_KEY,
-    model: (env as unknown as Record<string, string>).OPENAI_MODEL,
-  };
+  return resolveProvider(env as unknown as Record<string, string | undefined>);
 }
 export function errorResponse(error: unknown) {
   if (error instanceof RuntimeError)

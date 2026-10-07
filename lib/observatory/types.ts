@@ -50,6 +50,7 @@ export type Run = {
   inputTokens: number;
   outputTokens: number;
   model: string | null;
+  provider?: "openai" | "groq";
   error: string | null;
 };
 export const PHASES = [

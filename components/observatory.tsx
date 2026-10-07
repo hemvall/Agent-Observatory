@@ -91,6 +91,7 @@ async function request(path: string, body?: unknown) {
     runs: Summary[];
     liveEnabled: boolean;
     model: string;
+    providerLabel?: string;
     error?: string;
   };
   if (!response.ok)
@@ -465,7 +466,8 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
         if (!active) return;
         setHistory(list.runs);
         setLiveEnabled(config.liveEnabled);
-        setModel(config.model);
+        setMode(config.liveEnabled ? "live" : "demo");
+        setModel(`${config.providerLabel || "IA"} · ${config.model}`);
         try {
           const preferences = JSON.parse(
             localStorage.getItem("observatory-avatar-preferences") || "{}",
@@ -1076,7 +1078,7 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
                 <p className="so-mode-note">
                   {run.mode === "demo"
                     ? "Démo sans modèle IA. Les constats proviennent de règles documentaires."
-                    : `Analyse IA · ${run.model || model}`}{" "}
+                    : `Analyse IA · ${run.provider === "groq" ? "Groq · " : run.provider === "openai" ? "OpenAI · " : ""}${run.model || model}`}{" "}
                   {running && "Garde cette page ouverte pendant l’analyse."}
                 </p>
               </>
