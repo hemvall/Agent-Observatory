@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { Avatar } from "@bible-strong/avatar-react";
+import type { AvatarProps } from "@bible-strong/avatar-react";
+import type { ComponentType } from "react";
 import type { AvatarDefinition } from "@bible-strong/avatar-core";
 import { livelyDefinition } from "@/lib/avatars/motion";
 import catalog from "@/lib/avatars/index.json";
@@ -44,6 +45,21 @@ export function AgentAvatar({
   size?: number;
   lively?: boolean;
 }) {
+  const [AvatarComponent, setAvatarComponent] =
+    useState<ComponentType<AvatarProps> | null>(null);
+  useEffect(() => {
+    let active = true;
+    import("@bible-strong/avatar-react")
+      .then(({ Avatar }) => {
+        if (active) setAvatarComponent(() => Avatar);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const safeName = AVATAR_NAMES.includes(name) ? name : "Strobi";
   const [loaded, setLoaded] = useState<{
     name: string;
@@ -74,7 +90,7 @@ export function AgentAvatar({
       active = false;
     };
   }, [safeName]);
-  if (!definition)
+  if (!definition || !AvatarComponent)
     return (
       <div
         className="avatar-loading"
@@ -89,7 +105,7 @@ export function AgentAvatar({
       </div>
     );
   return (
-    <Avatar
+    <AvatarComponent
       definition={animatedDefinition!}
       animation={animation}
       size={size}

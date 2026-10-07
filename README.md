@@ -1,22 +1,38 @@
-# Agent Observatory
+# Agent Observatory · AI Work Lab
 
-**Un document ou un dépôt GitHub, quatre personnages animés, un diagnostic avec ses sources.**
+**Construire un assistant documentaire, observer son exécution et comparer ses versions sur des tests reproductibles.**
 
-## À quoi ça sert ?
+## Premier parcours
 
-Agent Observatory analyse un échantillon du code et de la documentation d’un projet technique pour comprendre son fonctionnement et identifier des améliorations. Le résultat contient une synthèse, des priorités, des actions concrètes et des extraits vérifiables avec leur fichier et leur ligne. Le rapport exporté reprend ce diagnostic. Il ne modifie pas le projet et n’exécute pas son code.
+1. Ouvrir l’atelier et choisir l’exemple de contrats fictifs, ou créer un projet avec ses propres documents texte.
+2. Régler la recherche, le prompt, le modèle et les quatre personnages Avatar Lab. Enregistrer crée une version figée lorsque la configuration change.
+3. Poser une question dans **Tester**. Inspecter les passages utilisés, la réponse, ses citations, les outils et les tokens réellement rapportés.
+4. Transformer une réponse ratée en test en indiquant les résultats attendus et interdits. Les critères restent explicites et modifiables.
+5. Dans **Comparer**, lancer deux versions sur les mêmes tests et le même corpus figé. Inspecter chaque échec avant de choisir une version.
+6. Exporter `assistant.mjs`, autonome sous Node 24, qui réutilise exactement la recherche et les contrôles du laboratoire.
 
-La vue principale est en français et suit trois actions :
+L’exemple permet une comparaison concrète sans clé : V1 récupère un seul passage et réussit 2 tests sur 3. Une V2 avec trois passages réussit les trois tests, dont une question qui nécessite deux documents.
 
-1. Choisir un exemple, un dépôt GitHub public ou coller un texte.
-2. Lancer l’analyse et voir les personnages organiser, lire, analyser et vérifier.
-3. Relire les constats, ouvrir leurs sources et autoriser le rapport.
+## Exécution et limites du laboratoire
 
-Les personnages proviennent de [hemvall/avatar-lab](https://github.com/hemvall/avatar-lab). Ils flottent, changent d’expression, montrent leurs outils pendant une étape, dorment pendant une pause et célèbrent le résultat. Les 14 apparences restent disponibles. Les animations respectent la préférence de réduction du mouvement.
+**Local** extrait les passages pertinents sans appeler un modèle ; le prompt et le modèle ne sont pas exécutés. **IA connectée** appelle Groq ou OpenAI avec une clé serveur. Une clé manquante ne provoque aucune bascule silencieuse. La recherche est lexicale, sans embeddings. Quatre rôles fixes rendent visibles la préparation, la recherche, la réponse et les contrôles ; ce premier parcours ne propose pas de graphe d’agents arbitraire.
 
-Sans clé, seuls les exemples fictifs sont disponibles en démo. Un dépôt ou un texte personnel nécessite une analyse IA configurée côté serveur. L’API refuse de créer une analyse de contenu réel en mode démo : aucune bascule silencieuse.
+Les personnages de [hemvall/avatar-lab](https://github.com/hemvall/avatar-lab) sont animés pendant leur étape réelle, avec pause et préférence de réduction du mouvement. Les 14 apparences sont disponibles. Le journal montre les entrées/sorties opérationnelles, sans pensées cachées ni coûts inventés.
 
-La liste latérale permet de rechercher et rouvrir les analyses, distinguées par date et mode. La vue Résultat s’ouvre automatiquement à la relecture et à la fin ; la progression et l’équipe restent dans une vue dédiée. Les exports et la reprise sont conservés. La **Vue technique**, accessible dans le pied de page, donne accès au journal des outils, à la relecture et à la comparaison des missions. La vue simple espace les étapes de 3,6 secondes pour laisser comprendre le travail ; ce délai n’est pas présenté comme du temps de calcul.
+Les contrôles vérifient les citations exactes, les sources attendues, des expressions attendues/interdites et l’abstention. Ils ne constituent pas un jugement sémantique général sur la qualité. Les injections, contextes vides et pannes d’outil sont des scénarios de test signalés. Les rôles public/interne simulent des droits documentaires ; ils ne remplacent pas une authentification applicative.
+
+Les projets, versions et expériences sont persistés en D1 avec révisions et verrous. Chaque expérience conserve une copie des documents, tests et configurations utilisés. L’onglet ouvert fait avancer les étapes ; il n’y a pas de file de travail autonome lorsque tous les onglets sont fermés. Les limites sont 12 documents, 60 000 caractères au total et 12 tests par comparaison.
+
+L’export contient les documents du projet, y compris internes, mais aucune clé. Utilisation :
+
+```sh
+node --env-file=.dev.vars assistant.mjs "Quelle est la règle de résiliation ?" public
+node --env-file=.dev.vars assistant.mjs --eval
+```
+
+Une évaluation exportée termine avec un code non nul si un critère échoue. L’analyse historique de documents et dépôts, ses checkpoints et son accord avant rapport restent accessibles via **Analyses** (`/analyses`).
+
+## Analyses historiques
 
 ## Two honest execution modes
 
@@ -46,7 +62,7 @@ GROQ_API_KEY=ta_cle_groq
 GROQ_MODEL=openai/gpt-oss-20b
 ```
 
-Redémarre `pnpm dev`. La vue simple sélectionne automatiquement l’IA lorsque la clé serveur est configurée. La clé reste côté serveur, hors de Git et de l’archive source. Ne la préfixe jamais avec `NEXT_PUBLIC_`.
+Après une mise à jour, arrête le serveur, lance `pnpm db:local` pour appliquer les migrations, puis redémarre `pnpm dev`. Le laboratoire sélectionne automatiquement le mode IA lorsque la clé serveur est configurée. La vue simple sélectionne automatiquement l’IA lorsque la clé serveur est configurée. La clé reste côté serveur, hors de Git et de l’archive source. Ne la préfixe jamais avec `NEXT_PUBLIC_`.
 
 Groq utilise son propre endpoint `https://api.groq.com/openai/v1/chat/completions`. Le modèle par défaut est `openai/gpt-oss-20b`, exécuté chez Groq. Tu peux choisir un autre modèle Groq compatible avec les sorties JSON strictes, comme `openai/gpt-oss-120b`. Voir la [documentation Groq](https://console.groq.com/docs/structured-outputs).
 
