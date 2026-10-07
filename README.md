@@ -4,7 +4,7 @@
 
 ## À quoi ça sert ?
 
-Agent Observatory aide à repérer les points à vérifier dans les documents d’un projet technique : reprise après une panne, droits d’accès, validation humaine, tests et limites déclarées. Il produit des constats sourcés et un rapport à télécharger. Il ne modifie pas le projet et n’exécute pas son code.
+Agent Observatory analyse un échantillon du code et de la documentation d’un projet technique pour comprendre son fonctionnement et identifier des améliorations. Le résultat contient une synthèse, des priorités, des actions concrètes et des extraits vérifiables avec leur fichier et leur ligne. Le rapport exporté reprend ce diagnostic. Il ne modifie pas le projet et n’exécute pas son code.
 
 La vue principale est en français et suit trois actions :
 
@@ -14,16 +14,16 @@ La vue principale est en français et suit trois actions :
 
 Les personnages proviennent de [hemvall/avatar-lab](https://github.com/hemvall/avatar-lab). Ils flottent, changent d’expression, montrent leurs outils pendant une étape, dorment pendant une pause et célèbrent le résultat. Les 14 apparences restent disponibles. Les animations respectent la préférence de réduction du mouvement.
 
-Le mode démo est utilisable sans clé. Il utilise des règles documentaires, pas un modèle IA. Les exemples intégrés sont fictifs. Le mode IA appelle un modèle configuré côté serveur.
+Sans clé, seuls les exemples fictifs sont disponibles en démo. Un dépôt ou un texte personnel nécessite une analyse IA configurée côté serveur. L’API refuse de créer une analyse de contenu réel en mode démo : aucune bascule silencieuse.
 
-L’historique, les exports et la reprise sont conservés. La **Vue technique**, accessible dans le pied de page, donne accès au journal des outils, à la relecture et à la comparaison des missions. La vue simple espace les étapes de 3,6 secondes pour laisser comprendre le travail ; ce délai n’est pas présenté comme du temps de calcul.
+La liste latérale permet de rechercher et rouvrir les analyses, distinguées par date et mode. La vue Résultat s’ouvre automatiquement à la relecture et à la fin ; la progression et l’équipe restent dans une vue dédiée. Les exports et la reprise sont conservés. La **Vue technique**, accessible dans le pied de page, donne accès au journal des outils, à la relecture et à la comparaison des missions. La vue simple espace les étapes de 3,6 secondes pour laisser comprendre le travail ; ce délai n’est pas présenté comme du temps de calcul.
 
 ## Two honest execution modes
 
-| Mode               | What happens                                                                                                                                                                                   | Credentials                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Deterministic demo | Real orchestration, source collection, rule-based findings, evidence checks, approval and persistence. Example scenarios use fixture documents. Repository/document scenarios read real input. | None                                           |
-| Connected AI       | The analysis stage calls Groq or OpenAI for structured, source-linked findings. The same execution and verification pipeline applies.                                                          | Server-side `GROQ_API_KEY` or `OPENAI_API_KEY` |
+| Mode               | What happens                                                                                                                             | Credentials                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Deterministic demo | Real orchestration and rule-based findings for fictional built-in examples only. Actual repository/document inputs require connected AI. | None                                           |
+| Connected AI       | The analysis stage calls Groq or OpenAI for structured, source-linked findings. The same execution and verification pipeline applies.    | Server-side `GROQ_API_KEY` or `OPENAI_API_KEY` |
 
 The demo reports zero tokens. The connected mode reports provider usage. No fabricated costs, model thoughts or semantic quality scores are shown. Traces contain actual tool input/output and short operational summaries.
 
@@ -82,7 +82,7 @@ Each `advance` request performs one stage. The UI drives automatic progression w
 
 D1 stores the mission JSON, revision and lease. Schema changes live in Drizzle migrations. There is no browser-only mission history; browser storage is used solely for avatar preferences. The UI shows the latest 50 missions. All application data belongs to the private instance; this prototype does not implement multi-tenant account isolation.
 
-GitHub collection is public and read-only. It inspects up to ten documentation/configuration files, a maximum of 40,000 characters, and pins file contents to blob SHAs from a single commit. It never runs repository code or tests. The collector rejects arbitrary hosts and oversized/truncated inventories.
+GitHub collection is public and read-only. It selects up to 16 code/documentation/configuration files, prioritizing README, manifests and backend/auth/API files, within a shared maximum of 40,000 characters, and pins file contents to blob SHAs from a single commit. It never runs repository code or tests. The collector rejects arbitrary hosts and oversized/truncated inventories.
 
 ## API
 
@@ -100,8 +100,8 @@ Example creation payload:
 ```json
 {
   "scenario": "repository",
-  "mode": "demo",
-  "objective": "Analyser les fondations et les limites documentées de ce dépôt.",
+  "mode": "live",
+  "objective": "Comprendre ce projet et identifier les améliorations prioritaires dans son code.",
   "repository": "hemvall/avatar-lab",
   "document": ""
 }
@@ -119,7 +119,7 @@ The application also exposes a feature-detected, read-only WebMCP tool, `inspect
 
 - Automatic progression needs an open page; there is no autonomous background queue.
 - External model calls are not exactly-once. A crash after an external call and before its checkpoint may cause a repeated call on resume.
-- The reference check validates IDs, not semantic correctness. Human review and domain evaluations remain necessary.
+- The reference check validates IDs; connected analysis also requires exact quoted evidence and computes line numbers from the source text. These checks do not validate semantic correctness. Human review and domain evaluations remain necessary.
 - The live provider adapter is implemented and covered by mocked failure/output tests. No paid live call was made during construction.
 - Large repositories and binary documents are outside this first version's collection scope.
 - Execution timing measures tool time, not end-to-end wall time or time waiting for human approval.

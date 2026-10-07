@@ -14,6 +14,8 @@ export type Finding = {
   detail: string;
   severity: "info" | "warning" | "critical";
   sourceIds: string[];
+  action?: string;
+  evidence?: { sourceId: string; quote: string; line: number }[];
 };
 export type Check = { name: string; passed: boolean; detail: string };
 export type Trace = {
@@ -47,6 +49,7 @@ export type Run = {
   checks: Check[];
   traces: Trace[];
   report: string;
+  overview?: { summary: string; strengths: string[]; limitations: string[] };
   inputTokens: number;
   outputTokens: number;
   model: string | null;

@@ -23,13 +23,19 @@ export function FindingsPanel({
 }) {
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState("all");
-  const matching = findings.filter(
-    (finding) =>
-      (severity === "all" || finding.severity === severity) &&
-      `${finding.title} ${finding.detail}`
-        .toLocaleLowerCase("fr")
-        .includes(query.trim().toLocaleLowerCase("fr")),
-  );
+  const matching = [...findings]
+    .sort(
+      (a, b) =>
+        ["critical", "warning", "info"].indexOf(a.severity) -
+        ["critical", "warning", "info"].indexOf(b.severity),
+    )
+    .filter(
+      (finding) =>
+        (severity === "all" || finding.severity === severity) &&
+        `${finding.title} ${finding.detail}`
+          .toLocaleLowerCase("fr")
+          .includes(query.trim().toLocaleLowerCase("fr")),
+    );
   return (
     <section
       className="findings-panel"
@@ -39,7 +45,7 @@ export function FindingsPanel({
     >
       <div className="section-title">
         <span className="section-index">05</span>
-        <h2 id="findings-title">Les constats et leurs preuves</h2>
+        <h2 id="findings-title">Les priorités et leurs preuves</h2>
         <span className="findings-count">{findings.length} constats</span>
       </div>
       <p className="findings-intro">
@@ -90,6 +96,23 @@ export function FindingsPanel({
               </header>
               <h3>{finding.title}</h3>
               <p>{finding.detail}</p>
+              {finding.action && (
+                <div className="finding-action">
+                  <strong>Action recommandée</strong>
+                  <p>{finding.action}</p>
+                </div>
+              )}
+              {finding.evidence?.map((proof, index) => (
+                <details className="finding-proof" key={index}>
+                  <summary>
+                    Preuve ·{" "}
+                    {sources.find((s) => s.id === proof.sourceId)?.name ||
+                      proof.sourceId}{" "}
+                    : ligne {proof.line}
+                  </summary>
+                  <pre>{proof.quote}</pre>
+                </details>
+              ))}
               <div className="finding-evidence">
                 {finding.sourceIds.map((id) => {
                   const source = sources.find((item) => item.id === id);
@@ -129,8 +152,8 @@ export function FindingsPanel({
         )}
       </div>
       <p className="findings-note">
-        <ShieldCheck size={15} aria-hidden="true" /> Audit documentaire. Aucun
-        code ni test du dépôt n’a été exécuté.
+        <ShieldCheck size={15} aria-hidden="true" /> Lecture du code et des
+        documents. Aucun code ni test du dépôt n’a été exécuté.
       </p>
     </section>
   );

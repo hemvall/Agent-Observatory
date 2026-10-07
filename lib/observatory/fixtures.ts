@@ -20,7 +20,7 @@ export const SCENARIOS = [
     title: "Explorer un dépôt GitHub",
     description: "Lire un dépôt public et produire un état des lieux sourcé.",
     objective:
-      "Analyser l’architecture et les contrôles documentés de ce dépôt public.",
+      "Comprendre le fonctionnement du projet, analyser le code collecté et proposer des améliorations concrètes, justifiées par des extraits.",
   },
   {
     id: "documents",

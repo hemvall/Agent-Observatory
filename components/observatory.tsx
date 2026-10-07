@@ -40,7 +40,7 @@ import {
 } from "@/lib/observatory/types";
 import { SCENARIOS } from "@/lib/observatory/fixtures";
 const TechnicalView = lazy(() => import("./technical-observatory"));
-type Summary = Pick<Run, "id" | "title" | "status" | "mode">;
+type Summary = Pick<Run, "id" | "title" | "status" | "mode" | "updatedAt">;
 type InputKind = "example" | "repository" | "documents";
 const JOBS = [
   "Organise le travail",
@@ -402,7 +402,7 @@ export default function Observatory() {
   );
 }
 function Workspace({ onTechnical }: { onTechnical: () => void }) {
-  const [kind, setKind] = useState<InputKind>("example");
+  const [kind, setKind] = useState<InputKind>("repository");
   const [example, setExample] = useState("architecture");
   const [repository, setRepository] = useState("hemvall/avatar-lab");
   const [documentText, setDocumentText] = useState("");
@@ -420,7 +420,8 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
   const [error, setError] = useState("");
   const [offline, setOffline] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
-  const [reportOpen, setReportOpen] = useState(false);
+  const [view, setView] = useState<"work" | "result">("work");
+  const [historyQuery, setHistoryQuery] = useState("");
   const selectedId = useRef<string | null>(null);
   const navigation = useRef(0);
   const inFlight = useRef(new Set<string>());
@@ -428,17 +429,19 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
   const results = useRef<HTMLElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!run || !window.matchMedia("(max-width: 760px)").matches) return;
-    const frame = requestAnimationFrame(() =>
-      stage.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-        block: "start",
-      }),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [run?.id]);
+    if (run && (run.status === "waiting" || run.status === "completed"))
+      setView("result");
+    else setView(run?.findings.length ? "result" : "work");
+  }, [run?.id, run?.status === "waiting", run?.status === "completed"]);
+  useEffect(() => {
+    if (view === "result") {
+      const frame = requestAnimationFrame(() => {
+        results.current?.focus({ preventScroll: true });
+        window.scrollTo({ top: 0, behavior: "instant" });
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [view, run?.id]);
   function receive(next: Run) {
     if (selectedId.current === next.id)
       setRun((previous) =>
@@ -635,11 +638,16 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
     }
   }
   async function launch() {
+    if (kind !== "example" && !liveEnabled) {
+      setError(
+        "Connecte une clé Groq côté serveur pour analyser ton contenu. Les exemples restent accessibles sans clé.",
+      );
+      return;
+    }
     if (busy || loading) return;
     const version = ++navigation.current;
     setBusy(true);
     setError("");
-    setReportOpen(false);
     const scenario = kind === "example" ? example : kind;
     const preset = SCENARIOS.find((item) => item.id === scenario)!;
     try {
@@ -648,7 +656,7 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
         objective: objective.trim() || preset.objective,
         repository,
         document: documentText,
-        mode,
+        mode: kind === "example" ? mode : "live",
       });
       void refreshHistory();
       if (navigation.current !== version) return;
@@ -671,7 +679,6 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
     setRun(null);
     setLoading(true);
     setError("");
-    setReportOpen(false);
     setOffline(false);
     try {
       const response = await request(`/api/runs/${id}`);
@@ -692,7 +699,6 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
     setRun(null);
     setLoading(false);
     setError("");
-    setReportOpen(false);
     setOffline(false);
     window.history.replaceState(null, "", window.location.pathname);
   }
@@ -723,14 +729,7 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
     }
   }
   function showResults() {
-    const element = results.current;
-    element?.focus({ preventScroll: true });
-    element?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "instant"
-        : "smooth",
-      block: "start",
-    });
+    setView("result");
   }
   const running = run?.status === "running";
   const activeStep = Math.min(run?.cursor || 0, 6);
@@ -744,21 +743,6 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
           </span>
         </a>
         <div className="so-header-actions">
-          <label className="so-history">
-            <History size={17} />
-            <select
-              aria-label="Ouvrir une analyse sauvegardée"
-              value={run?.id || ""}
-              onChange={(event) => void open(event.target.value)}
-            >
-              <option value="">Mes analyses</option>
-              {history.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.title} · {STATUS_LABEL[item.status]}
-                </option>
-              ))}
-            </select>
-          </label>
           {run && (
             <button className="so-button quiet" onClick={reset}>
               <Plus size={16} /> Nouvelle analyse
@@ -766,540 +750,674 @@ function Workspace({ onTechnical }: { onTechnical: () => void }) {
           )}
         </div>
       </header>
-      <main className="so-main">
-        <div className="so-intro">
-          <span className="so-eyebrow">
-            UN CONTENU. UNE ÉQUIPE. UN DIAGNOSTIC.
-          </span>
-          <h1>
-            Comprends ce qui fonctionne.
-            <br />
-            <span>Repère ce qu’il faut améliorer.</span>
-          </h1>
-          <p>
-            Donne un document technique ou un dépôt GitHub à l’équipe. Elle le
-            lit, relève les points à vérifier et te prépare un rapport avec ses
-            sources.
-          </p>
-        </div>
-        <div className="so-journey" aria-label="Le parcours">
-          <span className={!run ? "current" : "done"}>
-            <b>{run ? <Check size={14} /> : "1"}</b>Choisis ton contenu
-          </span>
-          <ArrowRight size={17} />
-          <span
-            className={
-              run && !["completed", "cancelled"].includes(run.status)
-                ? "current"
-                : run?.status === "completed"
-                  ? "done"
-                  : ""
-            }
-          >
-            <b>2</b>Regarde l’équipe travailler
-          </span>
-          <ArrowRight size={17} />
-          <span className={run?.status === "completed" ? "current" : ""}>
-            <b>3</b>Lis ton diagnostic
-          </span>
-        </div>
-        {error && (
-          <div className="so-alert" role="alert">
-            <span>{error}</span>
-            <button
-              className="so-icon"
-              aria-label="Fermer le message"
-              onClick={() => setError("")}
-            >
-              <X size={18} />
-            </button>
+      <div className="so-app-layout">
+        <aside className="so-library" aria-label="Mes analyses">
+          <div className="so-library-heading">
+            <History size={18} />
+            <h2>Mes analyses</h2>
           </div>
-        )}
-        {offline && (
-          <p className="so-alert" role="status">
-            Connexion interrompue. Le dernier état reçu reste visible ;
-            l’actualisation reprend automatiquement.
-          </p>
-        )}
-        <div className="so-workspace">
-          <section className="so-task">
-            {!run ? (
-              <>
-                <span className="so-eyebrow">01 / LE CONTENU</span>
-                <h2>Que veux-tu analyser ?</h2>
-                <p className="so-task-copy">
-                  Commence par un exemple, ou apporte ton propre contenu.
-                </p>
-                <div
-                  className="so-input-tabs"
-                  role="group"
-                  aria-label="Type de contenu"
+          <button className="so-button primary" onClick={reset}>
+            <Plus size={17} /> Nouvelle analyse
+          </button>
+          <input
+            type="search"
+            aria-label="Rechercher une analyse"
+            placeholder="Rechercher…"
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+          />
+          <nav className="so-history-list" aria-label="Analyses sauvegardées">
+            {history
+              .filter((item) =>
+                item.title
+                  .toLocaleLowerCase("fr")
+                  .includes(historyQuery.toLocaleLowerCase("fr")),
+              )
+              .map((item) => (
+                <button
+                  key={item.id}
+                  aria-current={run?.id === item.id ? "page" : undefined}
+                  onClick={() => void open(item.id)}
                 >
-                  <button
-                    aria-pressed={kind === "example"}
-                    onClick={() => setKind("example")}
-                  >
-                    <Sparkles size={16} /> Exemple
-                  </button>
-                  <button
-                    aria-pressed={kind === "repository"}
-                    onClick={() => setKind("repository")}
-                  >
-                    <GitBranch size={16} /> GitHub
-                  </button>
-                  <button
-                    aria-pressed={kind === "documents"}
-                    onClick={() => setKind("documents")}
-                  >
-                    <FileText size={16} /> Texte
-                  </button>
-                </div>
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void launch();
-                  }}
-                >
-                  {kind === "example" ? (
-                    <div className="so-example-options">
-                      {[
-                        {
-                          id: "architecture",
-                          name: "Un projet d’agent IA",
-                          text: "Peut-il reprendre après une panne ? Quelles sont ses limites ?",
-                          icon: Orbit,
-                        },
-                        {
-                          id: "security",
-                          name: "Un assistant d’entreprise",
-                          text: "Ses accès et ses actions sont-ils bien encadrés ?",
-                          icon: ShieldCheck,
-                        },
-                      ].map((item) => (
-                        <label
-                          key={item.id}
-                          className={example === item.id ? "chosen" : ""}
-                        >
-                          <input
-                            type="radio"
-                            name="example"
-                            value={item.id}
-                            checked={example === item.id}
-                            onChange={() => setExample(item.id)}
-                          />
-                          <item.icon size={23} />
-                          <span>
-                            <strong>{item.name}</strong>
-                            <small>{item.text}</small>
-                          </span>
-                          <Check size={16} className="so-choice-check" />
-                        </label>
-                      ))}
-                      <p className="so-fixture-note">
-                        Exemples fictifs fournis avec l’app. Aucun compte
-                        requis.
-                      </p>
-                    </div>
-                  ) : kind === "repository" ? (
-                    <label className="so-field">
-                      Lien du dépôt public
-                      <input
-                        value={repository}
-                        onChange={(event) => setRepository(event.target.value)}
-                        placeholder="https://github.com/proprietaire/projet"
-                        maxLength={180}
-                        required
-                      />
-                      <small>
-                        L’équipe lit les documents et configurations. Elle
-                        n’exécute pas le code.
-                      </small>
-                    </label>
-                  ) : (
-                    <label className="so-field">
-                      Ton document
-                      <textarea
-                        rows={7}
-                        value={documentText}
-                        onChange={(event) =>
-                          setDocumentText(event.target.value)
-                        }
-                        placeholder="Colle une spécification, une description d’architecture ou un document de projet…"
-                        minLength={40}
-                        maxLength={40000}
-                        required
-                      />
-                      <small>
-                        {documentText.length.toLocaleString("fr")} / 40 000
-                        caractères · 40 minimum
-                      </small>
-                    </label>
-                  )}
-                  <details className="so-options">
-                    <summary>
-                      <Settings2 size={16} /> Adapter l’analyse{" "}
-                      <ChevronDown size={15} />
-                    </summary>
-                    <label className="so-field">
-                      Ce que tu veux vérifier
-                      <input
-                        value={objective}
-                        onChange={(event) => setObjective(event.target.value)}
-                        minLength={12}
-                        maxLength={2000}
-                        placeholder="Laisse vide pour utiliser l’objectif proposé"
-                      />
-                    </label>
-                    <label className="so-field">
-                      Mode d’analyse
-                      <select
-                        value={mode}
-                        onChange={(event) =>
-                          setMode(event.target.value as Run["mode"])
-                        }
-                      >
-                        <option value="demo">Démo, sans modèle IA</option>
-                        <option value="live" disabled={!liveEnabled}>
-                          IA connectée{" "}
-                          {liveEnabled ? `· ${model}` : "· non configurée"}
-                        </option>
-                      </select>
-                    </label>
-                  </details>
-                  <button
-                    className="so-button primary so-launch"
-                    disabled={busy || loading}
-                  >
-                    {busy || loading ? (
-                      <Loader2 size={19} className="spin" />
-                    ) : (
-                      <Play size={19} />
-                    )}{" "}
-                    {loading
-                      ? "Chargement…"
-                      : busy
-                        ? "Lancement…"
-                        : "Lancer l’analyse"}
-                    <ArrowRight size={19} />
-                  </button>
-                  <p className="so-mode-note">
-                    {mode === "demo"
-                      ? "Mode démo : de vraies étapes et des règles documentaires, sans appel à un modèle IA."
-                      : `Mode IA : l’analyse appelle ${model}. Les tokens utilisés sont enregistrés.`}
+                  <strong>{item.title}</strong>
+                  <span>
+                    {STATUS_LABEL[item.status]} ·{" "}
+                    {item.mode === "demo" ? "Exemple sans IA" : "Analyse IA"}
+                  </span>
+                  <small>
+                    {new Date(item.updatedAt).toLocaleString("fr-FR", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    · {item.id.slice(0, 6)}
+                  </small>
+                </button>
+              ))}
+            {!history.length && (
+              <p>Tes analyses sauvegardées apparaîtront ici.</p>
+            )}
+          </nav>
+        </aside>
+        <main className="so-main">
+          <div className="so-view-heading">
+            <div>
+              <h1>{run ? run.title : "Nouvelle analyse"}</h1>
+              <p>
+                {run
+                  ? run.objective
+                  : "Un diagnostic de ton code ou de ton document, avec des preuves et des actions concrètes."}
+              </p>
+            </div>
+          </div>
+          {run && (
+            <nav className="so-view-tabs" aria-label="Vue de l’analyse">
+              <button
+                aria-pressed={view === "work"}
+                onClick={() => setView("work")}
+              >
+                <Orbit size={17} /> Équipe et progression
+              </button>
+              <button
+                aria-pressed={view === "result"}
+                disabled={!run.findings.length}
+                onClick={showResults}
+              >
+                <FileText size={17} /> Résultat
+                {run.findings.length
+                  ? ` · ${run.findings.length} constats`
+                  : ""}
+              </button>
+            </nav>
+          )}
+          {error && (
+            <div className="so-alert" role="alert">
+              <span>{error}</span>
+              <button
+                className="so-icon"
+                aria-label="Fermer le message"
+                onClick={() => setError("")}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
+          {offline && (
+            <p className="so-alert" role="status">
+              Connexion interrompue. Le dernier état reçu reste visible ;
+              l’actualisation reprend automatiquement.
+            </p>
+          )}
+          <div
+            className="so-workspace"
+            hidden={view === "result" && !!run?.findings.length}
+          >
+            <section className="so-task">
+              {!run ? (
+                <>
+                  <span className="so-eyebrow">01 / LE CONTENU</span>
+                  <h2>Que veux-tu analyser ?</h2>
+                  <p className="so-task-copy">
+                    Commence par un exemple, ou apporte ton propre contenu.
                   </p>
-                </form>
-              </>
-            ) : (
-              <>
-                <span className="so-eyebrow">TON ANALYSE</span>
-                <h2 className="so-run-title">
-                  {run.scenario === "architecture"
-                    ? "Un projet d’agent IA"
-                    : run.scenario === "security"
-                      ? "Un assistant d’entreprise"
-                      : run.scenario === "repository"
-                        ? run.repository
-                        : "Ton document"}
-                </h2>
-                <p className="so-task-copy">{run.objective}</p>
-                <span className={`so-status status-${run.status}`}>
-                  {STATUS_LABEL[run.status]}
-                </span>
-                <ol className="so-steps">
-                  {STEP_NAMES.map((name, index) => (
-                    <li
-                      key={name}
-                      className={
-                        index < run.cursor
-                          ? "done"
-                          : index === activeStep && run.status !== "completed"
-                            ? "current"
-                            : ""
+                  <div
+                    className="so-input-tabs"
+                    role="group"
+                    aria-label="Type de contenu"
+                  >
+                    <button
+                      aria-pressed={kind === "example"}
+                      onClick={() => setKind("example")}
+                    >
+                      <Sparkles size={16} /> Exemple
+                    </button>
+                    <button
+                      aria-pressed={kind === "repository"}
+                      onClick={() => setKind("repository")}
+                    >
+                      <GitBranch size={16} /> GitHub
+                    </button>
+                    <button
+                      aria-pressed={kind === "documents"}
+                      onClick={() => setKind("documents")}
+                    >
+                      <FileText size={16} /> Texte
+                    </button>
+                  </div>
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void launch();
+                    }}
+                  >
+                    {kind === "example" ? (
+                      <div className="so-example-options">
+                        {[
+                          {
+                            id: "architecture",
+                            name: "Un projet d’agent IA",
+                            text: "Peut-il reprendre après une panne ? Quelles sont ses limites ?",
+                            icon: Orbit,
+                          },
+                          {
+                            id: "security",
+                            name: "Un assistant d’entreprise",
+                            text: "Ses accès et ses actions sont-ils bien encadrés ?",
+                            icon: ShieldCheck,
+                          },
+                        ].map((item) => (
+                          <label
+                            key={item.id}
+                            className={example === item.id ? "chosen" : ""}
+                          >
+                            <input
+                              type="radio"
+                              name="example"
+                              value={item.id}
+                              checked={example === item.id}
+                              onChange={() => setExample(item.id)}
+                            />
+                            <item.icon size={23} />
+                            <span>
+                              <strong>{item.name}</strong>
+                              <small>{item.text}</small>
+                            </span>
+                            <Check size={16} className="so-choice-check" />
+                          </label>
+                        ))}
+                        <p className="so-fixture-note">
+                          Exemples fictifs fournis avec l’app. Aucun compte
+                          requis.
+                        </p>
+                      </div>
+                    ) : kind === "repository" ? (
+                      <label className="so-field">
+                        Lien du dépôt public
+                        <input
+                          value={repository}
+                          onChange={(event) =>
+                            setRepository(event.target.value)
+                          }
+                          placeholder="https://github.com/proprietaire/projet"
+                          maxLength={180}
+                          required
+                        />
+                        <small>
+                          L’équipe examine un échantillon de code, la
+                          documentation et les configurations. Elle n’exécute
+                          pas le code.
+                        </small>
+                      </label>
+                    ) : (
+                      <label className="so-field">
+                        Ton document
+                        <textarea
+                          rows={7}
+                          value={documentText}
+                          onChange={(event) =>
+                            setDocumentText(event.target.value)
+                          }
+                          placeholder="Colle une spécification, une description d’architecture ou un document de projet…"
+                          minLength={40}
+                          maxLength={40000}
+                          required
+                        />
+                        <small>
+                          {documentText.length.toLocaleString("fr")} / 40 000
+                          caractères · 40 minimum
+                        </small>
+                      </label>
+                    )}
+                    {kind !== "example" && !liveEnabled && (
+                      <div className="so-connect-notice" role="status">
+                        <h3>Groq n’est pas connecté à cette instance.</h3>
+                        <p>
+                          Ton contenu nécessite une vraie analyse IA. Aucune
+                          démo ne sera lancée à sa place.
+                        </p>
+                        <details>
+                          <summary>Configurer Groq en local</summary>
+                          <p>
+                            Copie <code>.env.example</code> vers{" "}
+                            <code>.dev.vars</code>, renseigne{" "}
+                            <code>GROQ_API_KEY</code>, puis redémarre les
+                            serveurs. Une clé locale ne configure pas
+                            automatiquement la version hébergée.
+                          </p>
+                        </details>
+                        <button
+                          type="button"
+                          className="so-button quiet"
+                          onClick={() => setKind("example")}
+                        >
+                          Explorer un exemple sans clé
+                        </button>
+                      </div>
+                    )}
+                    <details className="so-options">
+                      <summary>
+                        <Settings2 size={16} /> Adapter l’analyse{" "}
+                        <ChevronDown size={15} />
+                      </summary>
+                      <label className="so-field">
+                        Ce que tu veux vérifier
+                        <input
+                          value={objective}
+                          onChange={(event) => setObjective(event.target.value)}
+                          minLength={12}
+                          maxLength={2000}
+                          placeholder="Laisse vide pour utiliser l’objectif proposé"
+                        />
+                      </label>
+                      {kind === "example" && (
+                        <label className="so-field">
+                          Mode d’analyse
+                          <select
+                            value={mode}
+                            onChange={(event) =>
+                              setMode(event.target.value as Run["mode"])
+                            }
+                          >
+                            <option value="demo">Démo, sans modèle IA</option>
+                            <option value="live" disabled={!liveEnabled}>
+                              IA connectée{" "}
+                              {liveEnabled ? `· ${model}` : "· non configurée"}
+                            </option>
+                          </select>
+                        </label>
+                      )}
+                    </details>
+                    <button
+                      className="so-button primary so-launch"
+                      disabled={
+                        busy || loading || (kind !== "example" && !liveEnabled)
                       }
                     >
-                      <span>
-                        {index < run.cursor ? <Check size={14} /> : index + 1}
-                      </span>
-                      <div>
-                        <strong>{name}</strong>
-                        {index === activeStep && running && (
-                          <small>
-                            {stepping === run.id
-                              ? "En cours…"
-                              : "Prochaine étape"}
-                          </small>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-                {run.error && <p className="so-inline-error">{run.error}</p>}
-                <div className="so-run-buttons">
-                  {running && (
-                    <button
-                      className="so-button quiet"
-                      disabled={busy}
-                      onClick={() => void act("pause")}
-                    >
-                      <Pause size={17} /> Mettre en pause
+                      {busy || loading ? (
+                        <Loader2 size={19} className="spin" />
+                      ) : (
+                        <Play size={19} />
+                      )}{" "}
+                      {loading
+                        ? "Chargement…"
+                        : busy
+                          ? "Lancement…"
+                          : kind === "example" && mode === "demo"
+                            ? "Voir l’exemple sans IA"
+                            : "Analyser avec l’IA"}
+                      <ArrowRight size={19} />
                     </button>
-                  )}
-                  {["paused", "failed"].includes(run.status) && (
-                    <button
-                      className="so-button primary"
-                      disabled={busy}
-                      onClick={() => void act("resume")}
-                    >
-                      <Play size={17} /> Reprendre
-                    </button>
-                  )}
-                  {run.findings.length > 0 && (
-                    <button className="so-button quiet" onClick={showResults}>
-                      <FileText size={17} /> Voir les constats
-                    </button>
-                  )}
-                  {!["completed", "cancelled"].includes(run.status) && (
-                    <button
-                      className="so-button stop"
-                      disabled={busy}
-                      onClick={() => void act("cancel")}
-                    >
-                      <Square size={14} /> Arrêter
-                    </button>
-                  )}
-                  {["completed", "cancelled", "paused", "failed"].includes(
-                    run.status,
-                  ) && (
-                    <button className="so-button quiet" onClick={reuse}>
-                      <Plus size={16} /> Réutiliser ce contenu
-                    </button>
-                  )}
-                </div>
-                <p className="so-mode-note">
-                  {run.mode === "demo"
-                    ? "Démo sans modèle IA. Les constats proviennent de règles documentaires."
-                    : `Analyse IA · ${run.provider === "groq" ? "Groq · " : run.provider === "openai" ? "OpenAI · " : ""}${run.model || model}`}{" "}
-                  {running && "Garde cette page ouverte pendant l’analyse."}
-                </p>
-              </>
-            )}
-          </section>
-          <div
-            ref={stage}
-            className={`so-stage-column ${run ? "has-mission" : ""}`}
-          >
-            <Team
-              run={run}
-              busy={stepping === run?.id}
-              selected={selected}
-              setSelected={setSelected}
-              avatars={avatars}
-              onCustomize={customize}
-            />
-            <div className="so-output-preview">
-              {run?.traces.length ? (
-                <>
-                  <span className="so-output-icon">
-                    <CheckCheck size={21} />
-                  </span>
-                  <div>
-                    <small>DERNIÈRE ÉTAPE TERMINÉE</small>
-                    <p key={run.traces.at(-1)!.id}>
-                      {run.traces.at(-1)!.summary}
+                    <p className="so-mode-note">
+                      {kind === "example" && mode === "demo"
+                        ? "Mode démo : de vraies étapes et des règles documentaires, sans appel à un modèle IA."
+                        : liveEnabled
+                          ? `Analyse IA · ${model}. Les tokens utilisés sont enregistrés.`
+                          : "Une clé API côté serveur est nécessaire."}
                     </p>
-                  </div>
-                  <span className="so-saved">Sauvegardé</span>
+                  </form>
                 </>
               ) : (
                 <>
-                  <span className="so-output-icon">
-                    <FileText size={21} />
+                  <span className="so-eyebrow">TON ANALYSE</span>
+                  <h2 className="so-run-title">
+                    {run.scenario === "architecture"
+                      ? "Un projet d’agent IA"
+                      : run.scenario === "security"
+                        ? "Un assistant d’entreprise"
+                        : run.scenario === "repository"
+                          ? run.repository
+                          : "Ton document"}
+                  </h2>
+                  <p className="so-task-copy">{run.objective}</p>
+                  <span className={`so-status status-${run.status}`}>
+                    {STATUS_LABEL[run.status]}
                   </span>
-                  <div>
-                    <small>CE QUE TU OBTIENS</small>
-                    <p>
-                      Des constats à relire, leurs documents d’origine et un
-                      rapport téléchargeable.
-                    </p>
+                  <ol className="so-steps">
+                    {STEP_NAMES.map((name, index) => (
+                      <li
+                        key={name}
+                        className={
+                          index < run.cursor
+                            ? "done"
+                            : index === activeStep && run.status !== "completed"
+                              ? "current"
+                              : ""
+                        }
+                      >
+                        <span>
+                          {index < run.cursor ? <Check size={14} /> : index + 1}
+                        </span>
+                        <div>
+                          <strong>{name}</strong>
+                          {index === activeStep && running && (
+                            <small>
+                              {stepping === run.id
+                                ? "En cours…"
+                                : "Prochaine étape"}
+                            </small>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  {run.error && <p className="so-inline-error">{run.error}</p>}
+                  <div className="so-run-buttons">
+                    {running && (
+                      <button
+                        className="so-button quiet"
+                        disabled={busy}
+                        onClick={() => void act("pause")}
+                      >
+                        <Pause size={17} /> Mettre en pause
+                      </button>
+                    )}
+                    {["paused", "failed"].includes(run.status) && (
+                      <button
+                        className="so-button primary"
+                        disabled={busy}
+                        onClick={() => void act("resume")}
+                      >
+                        <Play size={17} /> Reprendre
+                      </button>
+                    )}
+                    {run.findings.length > 0 && (
+                      <button className="so-button quiet" onClick={showResults}>
+                        <FileText size={17} /> Voir les constats
+                      </button>
+                    )}
+                    {!["completed", "cancelled"].includes(run.status) && (
+                      <button
+                        className="so-button stop"
+                        disabled={busy}
+                        onClick={() => void act("cancel")}
+                      >
+                        <Square size={14} /> Arrêter
+                      </button>
+                    )}
+                    {["completed", "cancelled", "paused", "failed"].includes(
+                      run.status,
+                    ) && (
+                      <button className="so-button quiet" onClick={reuse}>
+                        <Plus size={16} /> Réutiliser ce contenu
+                      </button>
+                    )}
                   </div>
+                  <p className="so-mode-note">
+                    {run.mode === "demo"
+                      ? "Démo sans modèle IA. Les constats proviennent de règles documentaires."
+                      : `Analyse IA · ${run.provider === "groq" ? "Groq · " : run.provider === "openai" ? "OpenAI · " : ""}${run.model || model}`}{" "}
+                    {running && "Garde cette page ouverte pendant l’analyse."}
+                  </p>
                 </>
               )}
-            </div>
-            <details className="so-explanation">
-              <summary>
-                <Orbit size={17} /> À quoi sert cette app ?{" "}
-                <ChevronDown size={16} />
-              </summary>
-              <p>
-                Agent Observatory rend une analyse documentaire facile à suivre.
-                Par exemple : repérer les limites décrites dans un projet
-                d’agent IA ou les accès à vérifier dans une spécification.
-              </p>
-              <p>
-                Les personnages représentent quatre rôles d’un même processus :
-                organiser, lire, analyser et vérifier. Ils montrent où en est le
-                travail. Ils ne sont pas quatre modèles indépendants.
-              </p>
-              <p>
-                En démo, des règles cherchent des mentions de reprise, de
-                droits, de tests ou de validation. Le mode IA utilise un modèle
-                configuré côté serveur. Tu relis les constats avant d’autoriser
-                le rapport.
-              </p>
-            </details>
-          </div>
-        </div>
-        {run && run.findings.length > 0 && (
-          <section
-            ref={results}
-            className="so-results"
-            tabIndex={-1}
-            aria-labelledby="so-results-title"
-          >
-            <div className="so-results-heading">
-              <div>
-                <span className="so-eyebrow">03 / TON DIAGNOSTIC</span>
-                <h2 id="so-results-title">Voilà ce que l’équipe a trouvé.</h2>
-                <p>Ouvre les sources pour vérifier chaque constat.</p>
+            </section>
+            <div
+              ref={stage}
+              className={`so-stage-column ${run ? "has-mission" : ""}`}
+            >
+              <Team
+                run={run}
+                busy={stepping === run?.id}
+                selected={selected}
+                setSelected={setSelected}
+                avatars={avatars}
+                onCustomize={customize}
+              />
+              <div className="so-output-preview">
+                {run?.traces.length ? (
+                  <>
+                    <span className="so-output-icon">
+                      <CheckCheck size={21} />
+                    </span>
+                    <div>
+                      <small>DERNIÈRE ÉTAPE TERMINÉE</small>
+                      <p key={run.traces.at(-1)!.id}>
+                        {run.traces.at(-1)!.summary}
+                      </p>
+                    </div>
+                    <span className="so-saved">Sauvegardé</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="so-output-icon">
+                      <FileText size={21} />
+                    </span>
+                    <div>
+                      <small>CE QUE TU OBTIENS</small>
+                      <p>
+                        Des constats à relire, leurs documents d’origine et un
+                        rapport téléchargeable.
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
-              <span className="so-result-stamp">
-                <ShieldCheck size={23} />
-                {run.status === "completed" ? "Rapport disponible" : "À relire"}
-              </span>
+              <details className="so-explanation">
+                <summary>
+                  <Orbit size={17} /> À quoi sert cette app ?{" "}
+                  <ChevronDown size={16} />
+                </summary>
+                <p>
+                  Agent Observatory aide à comprendre un projet et à décider
+                  quoi améliorer. Par exemple : repérer les limites décrites
+                  dans un projet d’agent IA ou les accès à vérifier dans une
+                  spécification.
+                </p>
+                <p>
+                  Les personnages représentent quatre rôles d’un même processus
+                  : organiser, lire, analyser et vérifier. Ils montrent où en
+                  est le travail. Ils ne sont pas quatre modèles indépendants.
+                </p>
+                <p>
+                  En démo, des règles cherchent des mentions de reprise, de
+                  droits, de tests ou de validation. Le mode IA utilise un
+                  modèle configuré côté serveur. Tu relis les constats avant
+                  d’autoriser le rapport.
+                </p>
+              </details>
             </div>
-            <FindingsPanel
-              key={run.id}
-              findings={run.findings}
-              sources={run.sources}
-              reviewing={run.status === "waiting"}
-              onSource={(value) => setSource(value)}
-            />
-            {run.status === "waiting" && (
-              <div className="so-approval">
-                <AgentAvatar
-                  name={avatars.reviewer || "Beebo"}
-                  animation="listening"
-                  lively
-                  size={80}
-                />
+          </div>
+          {run && run.findings.length > 0 && view === "result" && (
+            <section
+              ref={results}
+              className="so-results"
+              tabIndex={-1}
+              aria-labelledby="so-results-title"
+            >
+              <div className="so-results-heading">
                 <div>
-                  <h3>Tu as relu les constats ?</h3>
+                  <span className="so-eyebrow">03 / TON DIAGNOSTIC</span>
+                  <h2 id="so-results-title">Diagnostic et actions</h2>
                   <p>
-                    Ton accord permet de les assembler dans le rapport final.
+                    Commence par les priorités, puis vérifie les extraits cités.
                   </p>
                 </div>
-                <button
-                  className="so-button primary"
-                  disabled={busy}
-                  onClick={() => void act("approve")}
-                >
-                  <Check size={18} /> Créer le rapport
-                </button>
+                <span className="so-result-stamp">
+                  <ShieldCheck size={23} />
+                  {run.status === "completed"
+                    ? "Rapport disponible"
+                    : run.status === "waiting"
+                      ? "À relire"
+                      : STATUS_LABEL[run.status]}
+                </span>
               </div>
-            )}
-            {run.report && (
-              <div className="so-report">
-                <div className="so-report-heading">
+              <div className="so-result-actions">
+                {run.report && (
+                  <button
+                    className="so-button quiet"
+                    onClick={() =>
+                      download(
+                        run.mode === "demo"
+                          ? "exemple-sans-ia.md"
+                          : "diagnostic.md",
+                        run.report,
+                      )
+                    }
+                  >
+                    <Download size={17} /> Exporter le diagnostic
+                  </button>
+                )}
+                <button className="so-button quiet" onClick={reuse}>
+                  <Plus size={16} /> Relancer ce contenu
+                </button>
+                {["failed", "paused"].includes(run.status) && (
+                  <button
+                    className="so-button primary"
+                    disabled={busy}
+                    onClick={() => void act("resume")}
+                  >
+                    <Play size={17} /> Reprendre la finalisation
+                  </button>
+                )}
+                {run.status === "running" && run.cursor >= 5 && (
+                  <span role="status">
+                    <Loader2 size={16} className="spin" /> Préparation de
+                    l’export…
+                  </span>
+                )}
+              </div>
+              {run.error && (
+                <p className="so-alert" role="alert">
+                  {run.error}
+                </p>
+              )}
+              {run.mode === "demo" && (
+                <p className="so-connect-notice">
+                  Exemple sans IA : ce résultat provient de règles prédéfinies.
+                  Ce n’est pas un audit de ton projet.
+                </p>
+              )}
+              {run.mode === "live" && !run.overview && (
+                <div className="so-connect-notice">
+                  Ancienne analyse au format simplifié. Relance-la pour obtenir
+                  la synthèse, les extraits et les recommandations.
+                  <button className="so-button quiet" onClick={reuse}>
+                    Relancer ce contenu
+                  </button>
+                </div>
+              )}
+              {run.overview && (
+                <section className="so-diagnosis">
+                  <h3>Ce qu’il faut retenir</h3>
+                  <p>{run.overview.summary}</p>
+                  {!!run.overview.strengths.length && (
+                    <div>
+                      <h4>Points forts observés</h4>
+                      <ul>
+                        {run.overview.strengths.map((v, i) => (
+                          <li key={i}>{v}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <details>
+                    <summary>
+                      Périmètre et limites · {run.sources.length} fichiers lus
+                    </summary>
+                    <ul>
+                      {run.overview.limitations.map((v, i) => (
+                        <li key={i}>{v}</li>
+                      ))}
+                    </ul>
+                    <p>
+                      Lecture ciblée : les extraits tronqués sont signalés dans
+                      les sources. Aucun test exécuté.
+                    </p>
+                  </details>
+                </section>
+              )}
+              {run.status === "waiting" && (
+                <div className="so-approval">
+                  <AgentAvatar
+                    name={avatars.reviewer || "Beebo"}
+                    animation="listening"
+                    lively
+                    size={80}
+                  />
                   <div>
-                    <h3>Ton rapport est prêt.</h3>
-                    <p>Garde une copie de l’analyse et des références.</p>
+                    <h3>Tu as relu les constats ?</h3>
+                    <p>
+                      Ton accord permet de les assembler dans le rapport final.
+                    </p>
                   </div>
                   <button
                     className="so-button primary"
-                    onClick={() => download("rapport.md", run.report)}
+                    disabled={busy}
+                    onClick={() => void act("approve")}
                   >
-                    <Download size={17} /> Télécharger le rapport
-                  </button>
-                  <button
-                    className="so-button quiet"
-                    aria-expanded={reportOpen}
-                    onClick={() => setReportOpen(!reportOpen)}
-                  >
-                    {reportOpen ? "Masquer" : "Lire ici"}
-                    <ChevronDown size={16} />
+                    <Check size={18} /> Créer le rapport
                   </button>
                 </div>
-                {reportOpen && (
-                  <article className="so-report-content">
-                    {run.report
-                      .split("\n")
-                      .map((line, index) =>
-                        line.startsWith("### ") ? (
-                          <h4 key={index}>{line.slice(4)}</h4>
-                        ) : line.startsWith("## ") ? (
-                          <h3 key={index}>{line.slice(3)}</h3>
-                        ) : line.startsWith("# ") ? (
-                          <h2 key={index}>{line.slice(2)}</h2>
-                        ) : line ? (
-                          <p key={index}>{line}</p>
-                        ) : (
-                          <br key={index} />
-                        ),
-                      )}
-                  </article>
-                )}
-              </div>
-            )}
-            <details className="so-explanation so-evidence">
-              <summary>
-                <FileText size={17} /> Documents, contrôles et détails de
-                l’analyse <ChevronDown size={16} />
-              </summary>
-              <div className="so-source-buttons">
-                {run.sources.map((item) => (
-                  <button
-                    key={item.id}
-                    className="so-button quiet"
-                    onClick={() => setSource(item)}
-                  >
-                    <FileText size={15} />
-                    {item.id} · {item.name}
-                  </button>
+              )}
+              <FindingsPanel
+                key={run.id}
+                findings={run.findings}
+                sources={run.sources}
+                reviewing={run.status === "waiting"}
+                onSource={(value) => setSource(value)}
+              />
+              <details className="so-explanation so-evidence">
+                <summary>
+                  <FileText size={17} /> Documents, contrôles et détails de
+                  l’analyse <ChevronDown size={16} />
+                </summary>
+                <div className="so-source-buttons">
+                  {run.sources.map((item) => (
+                    <button
+                      key={item.id}
+                      className="so-button quiet"
+                      onClick={() => setSource(item)}
+                    >
+                      <FileText size={15} />
+                      {item.id} · {item.name}
+                    </button>
+                  ))}
+                </div>
+                {run.checks.map((item) => (
+                  <p key={item.name}>
+                    <strong>
+                      {item.passed ? "✓" : "✕"} {item.name}
+                    </strong>
+                    <br />
+                    {item.detail}
+                  </p>
                 ))}
-              </div>
-              {run.checks.map((item) => (
-                <p key={item.name}>
-                  <strong>
-                    {item.passed ? "✓" : "✕"} {item.name}
-                  </strong>
-                  <br />
-                  {item.detail}
+                <p>
+                  {run.inputTokens + run.outputTokens} tokens mesurés ·{" "}
+                  {run.traces.length} étapes enregistrées
                 </p>
-              ))}
-              <p>
-                {run.inputTokens + run.outputTokens} tokens mesurés ·{" "}
-                {run.traces.length} étapes enregistrées
-              </p>
-              <div className="so-source-buttons">
-                <button
-                  className="so-button quiet"
-                  onClick={() =>
-                    download(
-                      "mission.json",
-                      JSON.stringify(run, null, 2),
-                      "application/json",
-                    )
-                  }
-                >
-                  <Download size={15} /> Exporter la mission
-                </button>
-                <button
-                  className="so-button quiet"
-                  onClick={() =>
-                    download(
-                      "traces.json",
-                      JSON.stringify(run.traces, null, 2),
-                      "application/json",
-                    )
-                  }
-                >
-                  <Download size={15} /> Exporter les traces
-                </button>
-              </div>
-            </details>
-          </section>
-        )}
-      </main>
+                <div className="so-source-buttons">
+                  <button
+                    className="so-button quiet"
+                    onClick={() =>
+                      download(
+                        "mission.json",
+                        JSON.stringify(run, null, 2),
+                        "application/json",
+                      )
+                    }
+                  >
+                    <Download size={15} /> Exporter la mission
+                  </button>
+                  <button
+                    className="so-button quiet"
+                    onClick={() =>
+                      download(
+                        "traces.json",
+                        JSON.stringify(run.traces, null, 2),
+                        "application/json",
+                      )
+                    }
+                  >
+                    <Download size={15} /> Exporter les traces
+                  </button>
+                </div>
+              </details>
+            </section>
+          )}
+        </main>
+      </div>
       <footer className="so-footer">
         <span>
           <Orbit size={16} /> Agent Observatory{" "}

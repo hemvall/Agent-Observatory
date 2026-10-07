@@ -64,12 +64,21 @@ test("Groq analysis uses its endpoint and strict schema, records the actual prov
           finish_reason: "stop",
           message: {
             content: JSON.stringify({
+              overview: {
+                summary:
+                  "Le projet documente un mécanisme de reprise persistant dont le comportement en cas de panne doit être vérifié.",
+                strengths: ["La reprise est explicitement documentée."],
+                limitations: ["Les tests ne sont pas exécutés."],
+              },
               findings: [
                 {
                   title: "Reprise",
                   detail: "Tests de panne à confirmer.",
                   severity: "warning",
                   sourceIds: ["S1"],
+                  action:
+                    "Ajouter un test de reprise après une panne et vérifier le checkpoint enregistré.",
+                  evidence: [{ sourceId: "S1", quote: input.document }],
                 },
               ],
             }),

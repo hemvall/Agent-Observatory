@@ -111,12 +111,23 @@ test("live analysis uses provider-reported tokens and rejects invented source ID
           finish_reason: "stop",
           message: {
             content: JSON.stringify({
+              overview: {
+                summary:
+                  "Le projet documente un mécanisme de reprise persistant dont le comportement en cas de panne doit être vérifié.",
+                strengths: ["La reprise est explicitement documentée."],
+                limitations: ["Les tests ne sont pas exécutés."],
+              },
               findings: [
                 {
                   title: "Reprise",
                   detail: "Checkpoint documenté, tests de panne à confirmer.",
                   severity: "info",
                   sourceIds: ["S1"],
+                  action:
+                    "Ajouter un test de reprise après une panne et vérifier le checkpoint enregistré.",
+                  evidence: [
+                    { sourceId: "S1", quote: "Checkpoint persistant." },
+                  ],
                 },
               ],
             }),
@@ -148,12 +159,23 @@ test("live analysis uses provider-reported tokens and rejects invented source ID
             finish_reason: "stop",
             message: {
               content: JSON.stringify({
+                overview: {
+                  summary:
+                    "Le projet documente un mécanisme de reprise persistant dont le comportement en cas de panne doit être vérifié.",
+                  strengths: ["La reprise est explicitement documentée."],
+                  limitations: ["Les tests ne sont pas exécutés."],
+                },
                 findings: [
                   {
                     title: "Unknown",
                     detail: "Claim",
                     severity: "warning",
                     sourceIds: ["S404"],
+                    action:
+                      "Ajouter un test de panne et vérifier le checkpoint enregistré.",
+                    evidence: [
+                      { sourceId: "S404", quote: "Checkpoint persistant." },
+                    ],
                   },
                 ],
               }),
@@ -213,6 +235,130 @@ test("repository collection pins blobs and citations to one commit", async () =>
       requested.some((u) => u.includes("ignored")),
       false,
     );
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("real content cannot silently use the rule-based demo", () => {
+  for (const scenario of ["repository", "documents"] as const)
+    assert.throws(
+      () =>
+        createRun(
+          {
+            ...input,
+            scenario,
+            repository: "owner/repo",
+            document: "x".repeat(50),
+          },
+          false,
+        ),
+      /nécessite une analyse IA/,
+    );
+});
+
+test("connected findings require exact evidence, compute line numbers and export actions", async () => {
+  const original = globalThis.fetch;
+  const { buildReport } = await import("../lib/observatory/engine.ts");
+  let quote = "return user.isAdmin;";
+  globalThis.fetch = async () =>
+    Response.json({
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: JSON.stringify({
+              overview: {
+                summary:
+                  "La route contrôle le rôle administrateur avant de permettre cette opération sensible.",
+                strengths: ["Une vérification de rôle est présente."],
+                limitations: ["Aucun test n’a été exécuté."],
+              },
+              findings: [
+                {
+                  title: "Contrôle du rôle",
+                  detail:
+                    "La permission dépend du rôle stocké sur l’utilisateur ; vérifier sa provenance.",
+                  severity: "warning",
+                  sourceIds: ["S1"],
+                  action:
+                    "Ajouter dans auth.ts un test avec un utilisateur non administrateur et vérifier le refus.",
+                  evidence: [{ sourceId: "S1", quote }],
+                },
+              ],
+            }),
+          },
+        },
+      ],
+      usage: { prompt_tokens: 20, completion_tokens: 80 },
+    });
+  try {
+    const run = createRun({ ...input, mode: "live" }, true);
+    run.cursor = 2;
+    run.sources = [
+      {
+        id: "S1",
+        name: "auth.ts",
+        content: "function allowed(user) {\n  return user.isAdmin;\n}",
+      },
+    ];
+    const next = await executeStep(run, { provider: "groq", apiKey: "test" });
+    assert.equal(next.findings[0].evidence?.[0].line, 2);
+    const report = buildReport(next);
+    assert.match(report, /Plan d’action/);
+    assert.match(report, /auth.ts, ligne 2/);
+    assert.match(report, /Ajouter dans auth.ts/);
+    quote = "return true; // invented";
+    await assert.rejects(
+      () => executeStep(run, { apiKey: "test" }),
+      /preuve citée est absente/,
+    );
+    assert.equal(run.findings.length, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("collector reads code and shares its budget without importing generated or vendored files", async () => {
+  const original = globalThis.fetch;
+  const { readRepository } = await import("../lib/observatory/engine.ts");
+  const files = [
+    { path: "README.md", sha: "readme" },
+    ...Array.from({ length: 20 }, (_, i) => ({
+      path: `src/api/route-${i}.ts`,
+      sha: `code${i}`,
+    })),
+    { path: "vendor/auth.ts", sha: "forbidden" },
+  ];
+  const requested: string[] = [];
+  globalThis.fetch = async (target) => {
+    const url = String(target);
+    requested.push(url);
+    if (url.endsWith("/owner/repo"))
+      return Response.json({ default_branch: "main" });
+    if (url.includes("/commits/"))
+      return Response.json({
+        sha: "commit",
+        commit: { tree: { sha: "tree" } },
+      });
+    if (url.includes("/git/trees/"))
+      return Response.json({
+        truncated: false,
+        tree: files.map((f) => ({ ...f, type: "blob", size: 20000 })),
+      });
+    if (url.includes("/git/blobs/"))
+      return Response.json({
+        content: btoa("export const permission = user.isAdmin;\n".repeat(500)),
+      });
+    throw new Error(url);
+  };
+  try {
+    const sources = await readRepository("owner/repo");
+    assert.equal(sources.length, 16);
+    assert.ok(sources.some((s) => s.name.endsWith(".ts")));
+    assert.ok(sources.reduce((n, s) => n + s.content.length, 0) <= 40000);
+    assert.ok(sources.every((s) => s.truncated));
+    assert.ok(requested.every((u) => !u.endsWith("/forbidden")));
   } finally {
     globalThis.fetch = original;
   }
