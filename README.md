@@ -1,20 +1,22 @@
 # Agent Observatory
 
-**Watch an AI mission become inspectable work.** An animated control room for document and repository audits, with durable checkpoints, tool traces, evidence-linked findings and a human approval gate.
+**Un document ou un dépôt GitHub, quatre personnages animés, un diagnostic avec ses sources.**
 
-The characters are the actual procedural avatars from [hemvall/avatar-lab](https://github.com/hemvall/avatar-lab), synchronized with its upstream before integration. Their expressions and animations respond to the current role. The 14-character library is available in the inspector.
+## À quoi ça sert ?
 
-## Try it
+Agent Observatory aide à repérer les points à vérifier dans les documents d’un projet technique : reprise après une panne, droits d’accès, validation humaine, tests et limites déclarées. Il produit des constats sourcés et un rapport à télécharger. Il ne modifie pas le projet et n’exécute pas son code.
 
-1. Choose an example audit, a public GitHub repository, or your own document.
-2. Launch the mission. Inspect a character, a tool trace, or a collected source.
-3. Pause and resume, or disable automatic progression and advance one step at a time.
-4. Read the finding cards, filter by severity or search, and open their cited sources. Approve the final report.
-5. Download the report, traces or full mission. Compare two saved executions.
+La vue principale est en français et suit trois actions :
 
-The mission briefing explains the current step and the next action. Interrupted connections show a stale-state notice and stop automatic progression until polling recovers. Reuse a paused or finished mission to prepare the same input for another run, without changing its saved history.
+1. Choisir un exemple, un dépôt GitHub public ou coller un texte.
+2. Lancer l’analyse et voir les personnages organiser, lire, analyser et vérifier.
+3. Relire les constats, ouvrir leurs sources et autoriser le rapport.
 
-The interface is in French. The **Comment ça marche** view explains the runtime and its limits.
+Les personnages proviennent de [hemvall/avatar-lab](https://github.com/hemvall/avatar-lab). Ils flottent, changent d’expression, montrent leurs outils pendant une étape, dorment pendant une pause et célèbrent le résultat. Les 14 apparences restent disponibles. Les animations respectent la préférence de réduction du mouvement.
+
+Le mode démo est utilisable sans clé. Il utilise des règles documentaires, pas un modèle IA. Les exemples intégrés sont fictifs. Le mode IA appelle un modèle configuré côté serveur.
+
+L’historique, les exports et la reprise sont conservés. La **Vue technique**, accessible dans le pied de page, donne accès au journal des outils, à la relecture et à la comparaison des missions. La vue simple espace les étapes de 3,6 secondes pour laisser comprendre le travail ; ce délai n’est pas présenté comme du temps de calcul.
 
 ## Two honest execution modes
 

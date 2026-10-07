@@ -1,33 +1,33 @@
 "use client";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+
 import {
-  Activity,
-  Archive,
-  BookOpen,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  ArrowRight,
   Check,
   CheckCheck,
   ChevronDown,
-  Clock3,
-  Code2,
   Download,
   FileText,
   GitBranch,
   History,
-  Layers3,
   Loader2,
   Orbit,
   Pause,
   Play,
   Plus,
-  Radio,
-  RotateCcw,
   Search,
+  Settings2,
   ShieldCheck,
   Sparkles,
   Square,
-  Terminal,
   X,
-  Zap,
 } from "lucide-react";
 import { AgentAvatar, AVATAR_NAMES } from "./agent-avatar";
 import { FindingsPanel } from "./findings-panel";
@@ -37,32 +37,47 @@ import {
   STATUS_LABEL,
   type Run,
   type Source,
-  type Trace,
-  type Check as RuntimeCheck,
 } from "@/lib/observatory/types";
 import { SCENARIOS } from "@/lib/observatory/fixtures";
-type Tab = "mission" | "traces" | "artifacts" | "compare" | "guide";
-type Summary = Pick<
-  Run,
-  "id" | "title" | "status" | "cursor" | "mode" | "updatedAt" | "scenario"
->;
-const NAV = [
-  { id: "mission", label: "Observatoire", icon: Orbit },
-  { id: "traces", label: "Journal d’exécution", icon: Terminal },
-  { id: "artifacts", label: "Livrables", icon: Archive },
-  { id: "compare", label: "Comparer", icon: GitBranch },
-  { id: "guide", label: "Comment ça marche", icon: BookOpen },
-] as const;
-function download(name: string, content: string, type = "text/plain") {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-async function api(path: string, body?: unknown) {
-  const res = await fetch(path, {
+const TechnicalView = lazy(() => import("./technical-observatory"));
+type Summary = Pick<Run, "id" | "title" | "status" | "mode">;
+type InputKind = "example" | "repository" | "documents";
+const JOBS = [
+  "Organise le travail",
+  "Lit les documents",
+  "Repère les points à vérifier",
+  "Vérifie les références",
+];
+const TALK = [
+  "Je prépare le plan.",
+  "Je lis les documents.",
+  "Je relève les points importants.",
+  "Je vérifie les références.",
+  "À toi de relire les constats !",
+  "Je prépare ton rapport.",
+  "Je vérifie le livrable.",
+];
+const NEXT = [
+  "Je vais organiser l’analyse.",
+  "Je vais lire les documents.",
+  "Je vais relever les points importants.",
+  "Je vais vérifier les références.",
+  "J’attends ton accord.",
+  "Je vais préparer ton rapport.",
+  "Je vais vérifier le livrable.",
+];
+const STEP_NAMES = [
+  "Préparation",
+  "Lecture",
+  "Analyse",
+  "Vérification",
+  "Votre accord",
+  "Rapport",
+  "Terminé",
+];
+async function request(path: string, body?: unknown) {
+  const response = await fetch(path, {
+    cache: "no-store",
     ...(body
       ? {
           method: "POST",
@@ -70,252 +85,439 @@ async function api(path: string, body?: unknown) {
           body: JSON.stringify(body),
         }
       : {}),
-    cache: "no-store",
   });
-  const data = (await res.json()) as {
+  const data = (await response.json()) as {
     run: Run;
     runs: Summary[];
     liveEnabled: boolean;
     model: string;
     error?: string;
   };
-  if (!res.ok)
-    throw Object.assign(new Error(data.error || "Requête indisponible."), {
-      status: res.status,
-    });
+  if (!response.ok)
+    throw Object.assign(
+      new Error(data.error || "Impossible de joindre le serveur. Réessayez."),
+      { status: response.status },
+    );
   return data;
 }
-function duration(ms: number) {
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+function download(name: string, value: string, type = "text/plain") {
+  const url = URL.createObjectURL(new Blob([value], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function ModeBadge({ mode }: { mode: Run["mode"] }) {
-  return (
-    <span className={`mode-badge ${mode}`}>
-      <span />
-      {mode === "demo" ? "DÉMO DÉTERMINISTE" : "IA CONNECTÉE"}
-    </span>
-  );
-}
-function Report({ text }: { text: string }) {
-  return (
-    <article className="report-paper">
-      {text
-        .split("\n")
-        .map((line, i) =>
-          line.startsWith("# ") ? (
-            <h2 key={i}>{line.slice(2)}</h2>
-          ) : line.startsWith("## ") ? (
-            <h3 key={i}>{line.slice(3)}</h3>
-          ) : line.startsWith("### ") ? (
-            <h4 key={i}>{line.slice(4)}</h4>
-          ) : line ? (
-            <p key={i}>{line}</p>
-          ) : (
-            <div className="report-space" key={i} />
-          ),
-        )}
-    </article>
-  );
-}
-function MissionBriefing({
-  run,
-  auto,
-  advancing,
+function SourceReader({
+  source,
+  onClose,
 }: {
-  run: Run;
-  auto: boolean;
-  advancing: boolean;
+  source: Source;
+  onClose: () => void;
 }) {
-  const phase = PHASES[Math.min(run.cursor, PHASES.length - 1)];
-  const role = AGENTS.find((agent) => agent.id === phase.agent)!;
-  const text =
-    run.status === "completed"
-      ? {
-          title: "Le rapport est prêt.",
-          detail:
-            "Retrouvez le livrable et les preuves dans l’onglet Livrables.",
-        }
-      : run.status === "waiting"
-        ? {
-            title: "Votre accord est attendu.",
-            detail:
-              "Relisez les constats ci-dessous, puis autorisez la rédaction du rapport.",
-          }
-        : run.status === "failed"
-          ? {
-              title: `Étape interrompue : ${phase.name.toLocaleLowerCase("fr")}.`,
-              detail:
-                "Les étapes terminées restent sauvegardées. Reprendre réessaie cette étape, sans recommencer la mission.",
-            }
-          : run.status === "cancelled"
-            ? {
-                title: "Mission annulée.",
-                detail:
-                  "Ses sources et ses traces restent consultables. Réutilisez son contenu pour préparer une nouvelle exécution.",
-              }
-            : run.status === "paused"
-              ? {
-                  title: `En pause avant « ${phase.name} ».`,
-                  detail: "Reprendre continuera depuis ce checkpoint.",
-                }
-              : {
-                  title: `${advancing ? "En cours" : "Prochaine étape"} : ${phase.name.toLocaleLowerCase("fr")}.`,
-                  detail: `${role.role} · ${phase.description} ${auto ? "L’enchaînement automatique nécessite cette page ouverte." : "Cliquez sur Étape suivante pour avancer."}`,
-                };
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => element?.close();
+  }, []);
   return (
-    <div className={`mission-briefing ${run.status}`} role="status">
-      <span className="briefing-icon">
-        {run.status === "completed" ? (
-          <CheckCheck size={19} />
-        ) : run.status === "waiting" ? (
-          <ShieldCheck size={19} />
-        ) : (
-          <Activity size={19} />
-        )}
-      </span>
-      <div>
-        <strong>{text.title}</strong>
-        <p>{text.detail}</p>
+    <dialog
+      ref={dialog}
+      className="so-source"
+      onCancel={onClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <header>
+        <div>
+          <small>DOCUMENT UTILISÉ · {source.id}</small>
+          <h2>{source.name}</h2>
+        </div>
+        <button
+          className="so-icon"
+          autoFocus
+          onClick={onClose}
+          aria-label="Fermer le document"
+        >
+          <X size={21} />
+        </button>
+      </header>
+      {source.url && (
+        <a href={source.url} target="_blank" rel="noreferrer">
+          Ouvrir le document d’origine sur GitHub <ArrowRight size={15} />
+        </a>
+      )}
+      {source.truncated && <p>Seul un extrait de ce document a été analysé.</p>}
+      <pre>{source.content}</pre>
+      <footer>
+        {source.content.length.toLocaleString("fr")} caractères
+        <button
+          className="so-button quiet"
+          onClick={() =>
+            download(source.name.replaceAll("/", "-"), source.content)
+          }
+        >
+          <Download size={15} /> Télécharger
+        </button>
+      </footer>
+    </dialog>
+  );
+}
+function Team({
+  run,
+  busy,
+  selected,
+  setSelected,
+  avatars,
+  onCustomize,
+}: {
+  run: Run | null;
+  busy: boolean;
+  selected: string;
+  setSelected: (id: string) => void;
+  avatars: Record<string, string>;
+  onCustomize: (name: string) => void;
+}) {
+  const [greet, setGreet] = useState<string | null>(null);
+  const greetingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (greetingTimer.current) clearTimeout(greetingTimer.current);
+    },
+    [],
+  );
+  const cursor = Math.min(run?.cursor || 0, 6);
+  const current =
+    run && ["running", "waiting", "failed"].includes(run.status)
+      ? PHASES[cursor].agent
+      : null;
+  const completed = run?.status === "completed";
+  const sleepy = run?.status === "paused" || run?.status === "cancelled";
+  const title = !run
+    ? "L’équipe attend ton premier contenu."
+    : completed
+      ? "Analyse terminée. À toi de jouer."
+      : run.status === "waiting"
+        ? "Une dernière décision t’appartient."
+        : run.status === "paused"
+          ? "Petite pause. On reprend quand tu veux."
+          : run.status === "failed"
+            ? "Une étape a rencontré un problème."
+            : run.status === "cancelled"
+              ? "Mission arrêtée. Les résultats sont conservés."
+              : [
+                  "On organise le travail.",
+                  "On lit les documents.",
+                  "On relève les points à vérifier.",
+                  "On vérifie les références.",
+                  "Ton accord est attendu.",
+                  "On assemble ton rapport.",
+                  "On vérifie le rapport.",
+                ][cursor];
+  function interact(id: string) {
+    setSelected(id);
+    setGreet(id);
+    if (greetingTimer.current) clearTimeout(greetingTimer.current);
+    greetingTimer.current = setTimeout(() => setGreet(null), 2000);
+  }
+  return (
+    <section
+      className="so-world"
+      aria-label="Les quatre personnages et leur activité"
+    >
+      <div className="so-world-heading">
+        <span>
+          <span
+            className={`so-live-dot ${run?.status === "running" ? "active" : ""}`}
+          />{" "}
+          L’ÉQUIPE
+        </span>
+        <small>Personnages d’Avatar Lab</small>
       </div>
-    </div>
+      <h2 key={title} className="so-world-title">
+        {title}
+      </h2>
+      <div className="so-world-stars" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className="so-team">
+        {AGENTS.map((agent, index) => {
+          const active = current === agent.id;
+          const done =
+            completed ||
+            (Boolean(run?.traces.some((trace) => trace.agent === agent.id)) &&
+              !active);
+          const animation = sleepy
+            ? "sleeping"
+            : run?.status === "failed" && active
+              ? "confused"
+              : completed
+                ? "happy"
+                : run?.status === "waiting" && active
+                  ? "listening"
+                  : active
+                    ? agent.animation
+                    : greet === agent.id
+                      ? "playful"
+                      : index % 2
+                        ? "curious"
+                        : "idle";
+          const speech = active
+            ? run?.status === "failed"
+              ? "On peut réessayer cette étape."
+              : run?.status === "waiting"
+                ? TALK[4]
+                : busy
+                  ? TALK[cursor]
+                  : NEXT[cursor]
+            : greet === agent.id
+              ? "Prêt à t’aider !"
+              : completed
+                ? "C’est prêt !"
+                : sleepy
+                  ? "Zzz…"
+                  : done
+                    ? "Mon étape est sauvegardée."
+                    : "À mon tour bientôt.";
+          return (
+            <button
+              key={agent.id}
+              className={`so-character ${active ? "is-working" : ""} ${completed ? "is-happy" : ""} ${sleepy ? "is-sleeping" : ""} ${selected === agent.id ? "is-selected" : ""}`}
+              onClick={() => interact(agent.id)}
+              aria-pressed={selected === agent.id}
+              style={
+                {
+                  "--character-color": agent.color,
+                  "--delay": `${index * -1.1}s`,
+                } as CSSProperties
+              }
+            >
+              <span
+                className={`so-speech ${active || greet === agent.id || completed ? "show" : ""}`}
+              >
+                {speech}
+              </span>
+              <span className="so-character-scene">
+                <span className="so-character-glow" />
+                <span className="so-avatar-body">
+                  <AgentAvatar
+                    name={avatars[agent.id] || agent.avatar}
+                    animation={animation}
+                    lively
+                    size={180}
+                  />
+                </span>
+                <span className="so-shadow" />
+                {active && run?.status === "running" && (
+                  <span
+                    className={`so-work-prop prop-${agent.id}`}
+                    aria-hidden="true"
+                  >
+                    {agent.id === "researcher" ? (
+                      <Search size={25} />
+                    ) : agent.id === "reviewer" ? (
+                      <ShieldCheck size={25} />
+                    ) : (
+                      <FileText size={25} />
+                    )}
+                    <i />
+                    <i />
+                  </span>
+                )}
+                {sleepy && (
+                  <span className="so-zzz" aria-hidden="true">
+                    z z z
+                  </span>
+                )}
+              </span>
+              <strong>{avatars[agent.id] || agent.avatar}</strong>
+              <span className="so-job">{JOBS[index]}</span>
+              <span className={`so-character-state ${active ? "active" : ""}`}>
+                {active
+                  ? run?.status === "waiting"
+                    ? "Attend ton accord"
+                    : run?.status === "failed"
+                      ? "À reprendre"
+                      : busy
+                        ? "Travaille"
+                        : "Se prépare"
+                  : sleepy
+                    ? "En pause"
+                    : done
+                      ? "Étape terminée"
+                      : "Prêt"}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="so-team-caption">
+        <span>
+          <Sparkles size={15} /> Clique sur un personnage pour le rencontrer.
+        </span>
+        <label>
+          Son apparence{" "}
+          <select
+            aria-label="Choisir le personnage du rôle sélectionné"
+            value={
+              avatars[selected] ||
+              AGENTS.find((agent) => agent.id === selected)!.avatar
+            }
+            onChange={(event) => onCustomize(event.target.value)}
+          >
+            {AVATAR_NAMES.map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </section>
   );
 }
 export default function Observatory() {
-  const [tab, setTab] = useState<Tab>("mission");
-  const [run, setRun] = useState<Run | null>(null);
-  const [history, setHistory] = useState<Summary[]>([]);
-  const [scenario, setScenario] = useState<Run["scenario"]>("architecture");
-  const [objective, setObjective] = useState<string>(SCENARIOS[0].objective);
+  const [technical, setTechnical] = useState(false);
+  return technical ? (
+    <>
+      <div className="so-technical-return">
+        <button onClick={() => setTechnical(false)}>
+          <ArrowRight size={17} /> Revenir à la vue simple
+        </button>
+        <span>Vue technique : outils, traces et comparaison</span>
+      </div>
+      <Suspense
+        fallback={<p className="so-loading">Chargement de la vue technique…</p>}
+      >
+        <TechnicalView />
+      </Suspense>
+    </>
+  ) : (
+    <Workspace onTechnical={() => setTechnical(true)} />
+  );
+}
+function Workspace({ onTechnical }: { onTechnical: () => void }) {
+  const [kind, setKind] = useState<InputKind>("example");
+  const [example, setExample] = useState("architecture");
   const [repository, setRepository] = useState("hemvall/avatar-lab");
   const [documentText, setDocumentText] = useState("");
+  const [objective, setObjective] = useState("");
   const [mode, setMode] = useState<Run["mode"]>("demo");
   const [liveEnabled, setLiveEnabled] = useState(false);
   const [model, setModel] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState("planner");
+  const [run, setRun] = useState<Run | null>(null);
+  const [history, setHistory] = useState<Summary[]>([]);
+  const [selected, setSelected] = useState("planner");
   const [avatars, setAvatars] = useState<Record<string, string>>({});
-  const [auto, setAuto] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [advancingId, setAdvancingId] = useState<string | null>(null);
+  const [stepping, setStepping] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [connectionLost, setConnectionLost] = useState(false);
   const [error, setError] = useState("");
-  const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
   const [source, setSource] = useState<Source | null>(null);
-  const [replay, setReplay] = useState(-1);
-  const [traceFilter, setTraceFilter] = useState("all");
-  const [compareId, setCompareId] = useState("");
-  const [compareRun, setCompareRun] = useState<Run | null>(null);
-  const dialogRef = useRef<HTMLElement | null>(null);
-  const sourceTrigger = useRef<HTMLElement | null>(null);
-  const inspectionRef = useRef<Run | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const selectedId = useRef<string | null>(null);
-  const navigationVersion = useRef(0);
+  const navigation = useRef(0);
   const inFlight = useRef(new Set<string>());
-  const mounted = useRef(true);
-  function receive(next: Run) {
-    if (selectedId.current !== next.id) return;
-    setRun((prev) =>
-      prev?.id === next.id && prev.revision >= next.revision ? prev : next,
+  const inspection = useRef<Run | null>(null);
+  const results = useRef<HTMLElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!run || !window.matchMedia("(max-width: 760px)").matches) return;
+    const frame = requestAnimationFrame(() =>
+      stage.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+        block: "start",
+      }),
     );
+    return () => cancelAnimationFrame(frame);
+  }, [run?.id]);
+  function receive(next: Run) {
+    if (selectedId.current === next.id)
+      setRun((previous) =>
+        previous?.id === next.id && previous.revision >= next.revision
+          ? previous
+          : next,
+      );
   }
   async function refreshHistory() {
     try {
-      const data = await api("/api/runs");
-      if (mounted.current) setHistory(data.runs);
+      setHistory((await request("/api/runs")).runs);
     } catch {
-      // Keep the last saved list on a transient network failure.
-    }
-  }
-  async function openRun(id: string) {
-    navigationVersion.current++;
-    selectedId.current = id;
-    setRun(null);
-    setConnectionLost(false);
-    setLoading(true);
-    setError("");
-    setReplay(-1);
-    setSelectedTrace(null);
-    try {
-      const data = await api(`/api/runs/${id}`);
-      if (selectedId.current !== id || !mounted.current) return;
-      receive(data.run);
-      setTab("mission");
-      window.history.replaceState(null, "", `?run=${id}`);
-    } catch (e) {
-      if (selectedId.current === id) setError((e as Error).message);
-    } finally {
-      if (selectedId.current === id) setLoading(false);
+      /* Last saved history remains visible. */
     }
   }
   useEffect(() => {
-    mounted.current = true;
     let active = true;
-    const initialNavigation = navigationVersion.current;
-    (async () => {
+    const initial = navigation.current;
+    void (async () => {
       try {
-        const [h, c] = await Promise.all([
-          api("/api/runs"),
-          api("/api/config"),
+        const [list, config] = await Promise.all([
+          request("/api/runs"),
+          request("/api/config"),
         ]);
         if (!active) return;
-        setHistory(h.runs);
-        setLiveEnabled(c.liveEnabled);
-        setModel(c.model);
+        setHistory(list.runs);
+        setLiveEnabled(config.liveEnabled);
+        setModel(config.model);
         try {
-          const saved = localStorage.getItem("observatory-avatar-preferences");
-          if (saved) {
-            const prefs = JSON.parse(saved);
-            if (prefs && typeof prefs === "object") {
-              setAvatars(
-                Object.fromEntries(
-                  AGENTS.flatMap((agent) =>
-                    AVATAR_NAMES.includes(prefs[agent.id])
-                      ? [[agent.id, prefs[agent.id]]]
-                      : [],
-                  ),
-                ),
-              );
-            }
-          }
+          const preferences = JSON.parse(
+            localStorage.getItem("observatory-avatar-preferences") || "{}",
+          );
+          setAvatars(
+            Object.fromEntries(
+              AGENTS.flatMap((agent) =>
+                AVATAR_NAMES.includes(preferences?.[agent.id])
+                  ? [[agent.id, preferences[agent.id]]]
+                  : [],
+              ),
+            ),
+          );
         } catch {
-          // Optional device preferences must never prevent mission loading.
+          /* Optional preferences. */
         }
-        const query = new URLSearchParams(window.location.search).get("run");
-        if (navigationVersion.current !== initialNavigation) return;
-        const id =
-          query && /^[0-9a-f-]{36}$/i.test(query) ? query : h.runs[0]?.id;
-        if (id) {
+        const id = new URLSearchParams(window.location.search).get("run");
+        if (
+          id &&
+          /^[0-9a-f-]{36}$/i.test(id) &&
+          navigation.current === initial
+        ) {
           selectedId.current = id;
-          const data = await api(`/api/runs/${id}`);
-          if (active) receive(data.run);
+          const response = await request(`/api/runs/${id}`);
+          if (active && navigation.current === initial) receive(response.run);
         }
-      } catch (e) {
-        if (active && navigationVersion.current === initialNavigation)
-          setError((e as Error).message);
+      } catch (exception) {
+        if (active && navigation.current === initial)
+          setError((exception as Error).message);
       } finally {
-        if (active && navigationVersion.current === initialNavigation)
-          setLoading(false);
+        if (active && navigation.current === initial) setLoading(false);
       }
     })();
     return () => {
       active = false;
-      mounted.current = false;
     };
   }, []);
   useEffect(() => {
     if (!run) return;
     const id = run.id;
     let active = true;
-    const timer = setInterval(async () => {
-      try {
-        const data = await api(`/api/runs/${id}`);
-        if (active) {
-          receive(data.run);
-          setConnectionLost(false);
-        }
-      } catch {
-        if (active) setConnectionLost(true);
-      }
+    const timer = setInterval(() => {
+      void request(`/api/runs/${id}`)
+        .then((response) => {
+          if (active) {
+            receive(response.run);
+            setOffline(false);
+          }
+        })
+        .catch(() => {
+          if (active) setOffline(true);
+        });
     }, 2500);
     return () => {
       active = false;
@@ -325,76 +527,39 @@ export default function Observatory() {
   useEffect(() => {
     if (
       !run ||
-      !auto ||
-      connectionLost ||
       run.status !== "running" ||
+      offline ||
       inFlight.current.has(run.id)
     )
       return;
     const id = run.id;
+    // Give each saved step time to be understood; this is UI pacing, not tool latency.
     const timer = setTimeout(
       () => void advance(id),
-      Math.max(1400, run.lockedUntil - Date.now() + 100),
+      Math.max(3600, run.lockedUntil - Date.now() + 100),
     );
     return () => clearTimeout(timer);
-  }, [
-    run?.id,
-    run?.revision,
-    run?.status,
-    run?.lockedUntil,
-    auto,
-    connectionLost,
-  ]);
+  }, [run?.id, run?.revision, run?.status, run?.lockedUntil, offline]);
   useEffect(() => {
-    if (!source) return;
-    function close(e: KeyboardEvent) {
-      if (e.key === "Escape") setSource(null);
-      if (e.key === "Tab") {
-        const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
-          "button,a[href],input,select,textarea",
-        );
-        if (!controls?.length) return;
-        const first = controls[0],
-          last = controls[controls.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("keydown", close);
-      sourceTrigger.current?.focus();
-    };
-  }, [source]);
-  useEffect(() => {
-    inspectionRef.current = run;
+    inspection.current = run;
   }, [run]);
   useEffect(() => {
     const context = (
       document as Document & {
         modelContext?: {
-          registerTool: (
-            tool: unknown,
-            options: unknown,
-          ) => void | Promise<void>;
+          registerTool: (tool: unknown, options: unknown) => unknown;
         };
       }
     ).modelContext;
-    if (!context?.registerTool) return;
+    if (!context) return;
     const lifecycle = new AbortController();
     try {
       void Promise.resolve(
         context.registerTool(
           {
             name: "inspect_selected_mission",
-            title: "Inspecter la mission sélectionnée",
             description:
-              "Lire le statut, les constats, les contrôles et les dernières traces de la mission visible. Ne modifie aucune donnée.",
+              "Lire la mission sélectionnée, ses constats et ses références. Ne modifie aucune donnée.",
             inputSchema: {
               type: "object",
               properties: {},
@@ -409,16 +574,14 @@ export default function Observatory() {
                 Object.keys(input).length
               )
                 throw new Error("Un objet vide est attendu.");
-              const current = inspectionRef.current;
-              return current
+              const value = inspection.current;
+              return value
                 ? {
-                    id: current.id,
-                    status: current.status,
-                    cursor: current.cursor,
-                    mode: current.mode,
-                    findings: current.findings,
-                    checks: current.checks,
-                    traces: current.traces.slice(-3),
+                    id: value.id,
+                    status: value.status,
+                    findings: value.findings,
+                    checks: value.checks,
+                    traces: value.traces.slice(-3),
                   }
                 : { selectedMission: null };
             },
@@ -427,994 +590,700 @@ export default function Observatory() {
         ),
       ).catch(() => {});
     } catch {
-      /* unsupported proposed API */
+      /* Optional browser capability. */
     }
     return () => lifecycle.abort();
   }, []);
-  useEffect(() => {
-    if (!compareId) {
-      setCompareRun(null);
-      return;
-    }
-    let active = true;
-    setCompareRun(null);
-    api(`/api/runs/${compareId}`)
-      .then((d) => {
-        if (active) setCompareRun(d.run);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      });
-    return () => {
-      active = false;
-    };
-  }, [compareId]);
   async function advance(id: string) {
     if (selectedId.current !== id || inFlight.current.has(id)) return;
     inFlight.current.add(id);
-    setAdvancingId(id);
+    setStepping(id);
     try {
-      const data = await api(`/api/runs/${id}`, { action: "advance" });
-      receive(data.run);
+      const response = await request(`/api/runs/${id}`, { action: "advance" });
+      receive(response.run);
       void refreshHistory();
-    } catch (e) {
+    } catch (exception) {
       if (
         selectedId.current === id &&
-        (e as { status?: number }).status !== 409
+        (exception as { status?: number }).status !== 409
       )
-        setError((e as Error).message);
+        setError((exception as Error).message);
       try {
-        receive((await api(`/api/runs/${id}`)).run);
+        receive((await request(`/api/runs/${id}`)).run);
       } catch {
-        /* preserve checkpoint */
+        /* Polling retries. */
       }
     } finally {
       inFlight.current.delete(id);
-      setAdvancingId((prev) => (prev === id ? null : prev));
+      setStepping((previous) => (previous === id ? null : previous));
     }
   }
-  async function action(name: string) {
-    if (!run) return;
+  async function act(action: string) {
+    if (!run || busy) return;
     const id = run.id;
     setBusy(true);
     setError("");
     try {
-      receive((await api(`/api/runs/${id}`, { action: name })).run);
-      if (selectedId.current === id) setReplay(-1);
+      receive((await request(`/api/runs/${id}`, { action })).run);
       void refreshHistory();
-    } catch (e) {
-      if (selectedId.current === id) setError((e as Error).message);
+    } catch (exception) {
+      if (selectedId.current === id) setError((exception as Error).message);
     } finally {
       setBusy(false);
     }
   }
   async function launch() {
-    if (busy) return;
+    if (busy || loading) return;
+    const version = ++navigation.current;
     setBusy(true);
-    const navigation = ++navigationVersion.current;
     setError("");
+    setReportOpen(false);
+    const scenario = kind === "example" ? example : kind;
+    const preset = SCENARIOS.find((item) => item.id === scenario)!;
     try {
-      const data = await api("/api/runs", {
+      const response = await request("/api/runs", {
         scenario,
-        objective,
+        objective: objective.trim() || preset.objective,
         repository,
         document: documentText,
         mode,
       });
       void refreshHistory();
-      if (navigationVersion.current !== navigation) return;
-      selectedId.current = data.run.id;
-      setRun(data.run);
-      setReplay(-1);
-      setSelectedTrace(null);
-      setAuto(true);
-      setTab("mission");
-      window.history.replaceState(null, "", `?run=${data.run.id}`);
-    } catch (e) {
-      if (navigationVersion.current === navigation)
-        setError((e as Error).message);
+      if (navigation.current !== version) return;
+      selectedId.current = response.run.id;
+      setRun(response.run);
+      setSelected("planner");
+      setOffline(false);
+      window.history.replaceState(null, "", `?run=${response.run.id}`);
+    } catch (exception) {
+      if (navigation.current === version)
+        setError((exception as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  function newMission() {
-    navigationVersion.current++;
+  async function open(id: string) {
+    if (!id) return;
+    const version = ++navigation.current;
+    selectedId.current = id;
+    setRun(null);
+    setLoading(true);
+    setError("");
+    setReportOpen(false);
+    setOffline(false);
+    try {
+      const response = await request(`/api/runs/${id}`);
+      if (version === navigation.current) {
+        receive(response.run);
+        window.history.replaceState(null, "", `?run=${id}`);
+      }
+    } catch (exception) {
+      if (version === navigation.current)
+        setError((exception as Error).message);
+    } finally {
+      if (version === navigation.current) setLoading(false);
+    }
+  }
+  function reset() {
+    navigation.current++;
     selectedId.current = null;
     setRun(null);
-    setError("");
-    setReplay(-1);
-    setTab("mission");
     setLoading(false);
-    setConnectionLost(false);
-    setSelectedTrace(null);
+    setError("");
+    setReportOpen(false);
+    setOffline(false);
     window.history.replaceState(null, "", window.location.pathname);
   }
-  function duplicateMission() {
+  function reuse() {
     if (!run) return;
-    setScenario(run.scenario);
-    setObjective(run.objective);
+    setKind(
+      run.scenario === "repository" || run.scenario === "documents"
+        ? run.scenario
+        : "example",
+    );
+    setExample(run.scenario === "security" ? "security" : "architecture");
     setRepository(run.repository);
     setDocumentText(run.document);
+    setObjective(run.objective);
     setMode(run.mode === "live" && !liveEnabled ? "demo" : run.mode);
-    newMission();
-  }
-  function chooseScenario(id: Run["scenario"]) {
-    setScenario(id);
-    setObjective(SCENARIOS.find((s) => s.id === id)!.objective);
+    reset();
   }
   function customize(name: string) {
-    const prefs = { ...avatars, [selectedAgent]: name };
-    setAvatars(prefs);
+    const preferences = { ...avatars, [selected]: name };
+    setAvatars(preferences);
     try {
       localStorage.setItem(
         "observatory-avatar-preferences",
-        JSON.stringify(prefs),
+        JSON.stringify(preferences),
       );
     } catch {
-      // The current choice still works when browser storage is disabled.
+      /* Device preference only. */
     }
   }
-  const advancing = run?.id === advancingId;
-  const displayedSources = replay < 0 || replay >= 1 ? run?.sources || [] : [];
-  const displayedFindings =
-    replay < 0 || replay >= 2 ? run?.findings || [] : [];
-  const displayedChecks =
-    replay < 0
-      ? run?.checks || []
-      : (run?.traces
-          .filter(
-            (t) =>
-              t.phase <= replay &&
-              (t.tool === "evidence.check" || t.tool === "evaluation.run"),
-          )
-          .at(-1)?.output as RuntimeCheck[] | undefined) || [];
-  const phaseIndex = replay >= 0 ? replay : (run?.cursor ?? 0);
-  const activeAgent =
-    run && run.status === "running"
-      ? PHASES[Math.min(run.cursor, 6)].agent
-      : null;
-  const visibleTraces =
-    run?.traces.filter((t) => replay < 0 || t.phase <= replay) || [];
-  const agent = AGENTS.find((a) => a.id === selectedAgent)!;
-  const trace =
-    visibleTraces.find((t) => t.id === selectedTrace) ||
-    visibleTraces.filter((t) => t.agent === selectedAgent).at(-1);
-  const progress = run ? Math.round((run.cursor / 7) * 100) : 0;
-  const filteredTraces = (run?.traces || []).filter(
-    (t) => traceFilter === "all" || t.agent === traceFilter,
-  );
-  const sumDuration = (r: Run) =>
-    r.traces.reduce((n, t) => n + t.durationMs, 0);
-  function traceRow(t: Trace) {
-    return (
-      <button
-        key={t.id}
-        className={`trace-row ${selectedTrace === t.id ? "selected" : ""}`}
-        onClick={() => {
-          setSelectedTrace(t.id);
-          setSelectedAgent(t.agent);
-          setTab("mission");
-          setReplay(-1);
-        }}
-      >
-        <span className="trace-symbol">
-          <Check size={14} />
-        </span>
-        <div>
-          <code>{t.tool}</code>
-          <p>{t.summary}</p>
-        </div>
-        <span className="trace-time">{duration(t.durationMs)}</span>
-      </button>
-    );
+  function showResults() {
+    const element = results.current;
+    element?.focus({ preventScroll: true });
+    element?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+      block: "start",
+    });
   }
-  const customName = (id: string) =>
-    avatars[id] || AGENTS.find((a) => a.id === id)!.avatar;
+  const running = run?.status === "running";
+  const activeStep = Math.min(run?.cursor || 0, 6);
   return (
-    <div className="observatory-shell">
-      <aside className="sidebar">
-        <a className="brand" href="/" aria-label="Accueil Agent Observatory">
-          <span className="brand-mark">
-            <Orbit size={24} />
-          </span>
+    <div className="simple-observatory">
+      <header className="so-header">
+        <a className="so-brand" href="/">
+          <Orbit size={27} />
           <span>
-            agent<span className="brand-secondary">observatory</span>
+            Agent <strong>Observatory</strong>
           </span>
         </a>
-        <div className="workspace-label">
-          <span className="workspace-swatch">L</span> Laboratoire personnel{" "}
-          <ChevronDown size={14} />
-        </div>
-        <p className="nav-caption">ESPACE DE TRAVAIL</p>
-        <nav>
-          {NAV.map((n) => (
-            <button
-              key={n.id}
-              className={tab === n.id ? "active" : ""}
-              aria-current={tab === n.id ? "page" : undefined}
-              onClick={() => setTab(n.id)}
+        <div className="so-header-actions">
+          <label className="so-history">
+            <History size={17} />
+            <select
+              aria-label="Ouvrir une analyse sauvegardée"
+              value={run?.id || ""}
+              onChange={(event) => void open(event.target.value)}
             >
-              <n.icon size={18} />
-              {n.label}
-              {n.id === "artifacts" && run?.report && (
-                <span className="nav-count">1</span>
-              )}
+              <option value="">Mes analyses</option>
+              {history.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title} · {STATUS_LABEL[item.status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {run && (
+            <button className="so-button quiet" onClick={reset}>
+              <Plus size={16} /> Nouvelle analyse
             </button>
-          ))}
-        </nav>
-        <div className="history-heading">
-          <span>MISSIONS RÉCENTES</span>
-          <button onClick={newMission} aria-label="Nouvelle mission">
-            <Plus size={16} />
-          </button>
-        </div>
-        <div className="run-history">
-          {history.length ? (
-            history.slice(0, 8).map((h) => (
-              <button
-                key={h.id}
-                onClick={() => void openRun(h.id)}
-                className={run?.id === h.id ? "selected" : ""}
-              >
-                <span className={`history-state ${h.status}`} />
-                <span>{h.title}</span>
-              </button>
-            ))
-          ) : (
-            <p className="empty-history">
-              Votre première mission apparaîtra ici.
-            </p>
           )}
         </div>
-        <div className="sidebar-footer">
-          <div className="footer-symbol">
-            <Layers3 size={20} />
-          </div>
-          <p>
-            Un agent. Des preuves.
+      </header>
+      <main className="so-main">
+        <div className="so-intro">
+          <span className="so-eyebrow">
+            UN CONTENU. UNE ÉQUIPE. UN DIAGNOSTIC.
+          </span>
+          <h1>
+            Comprends ce qui fonctionne.
             <br />
-            <span>Chaque étape devient visible.</span>
+            <span>Repère ce qu’il faut améliorer.</span>
+          </h1>
+          <p>
+            Donne un document technique ou un dépôt GitHub à l’équipe. Elle le
+            lit, relève les points à vérifier et te prépare un rapport avec ses
+            sources.
           </p>
-          <a
-            href="https://github.com/hemvall/avatar-lab"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Personnages d’Avatar Lab
-          </a>
-          <a href="/api/source" target="_blank" rel="noreferrer">
-            Code source · AGPL-3.0
-          </a>
-          <span className="version-label">OBSERVATORY / 0.1.0</span>
         </div>
-      </aside>
-      <div className="main-shell">
-        <header className="topbar">
-          <div className="breadcrumb">
-            Laboratoire <span>/</span>{" "}
-            <strong>{NAV.find((n) => n.id === tab)?.label}</strong>
-          </div>
-          <div className="topbar-actions">
-            <details className="history-menu">
-              <summary aria-label="Choisir une mission sauvegardée">
-                <History size={16} />
-                <span>Missions</span>
-              </summary>
-              <div>
-                {history.length ? (
-                  history.map((h) => (
-                    <button
-                      key={h.id}
-                      onClick={(e) => {
-                        e.currentTarget
-                          .closest("details")
-                          ?.removeAttribute("open");
-                        void openRun(h.id);
-                      }}
-                    >
-                      <span>{h.title}</span>
-                      <small>{STATUS_LABEL[h.status]}</small>
-                    </button>
-                  ))
-                ) : (
-                  <p>Aucune mission sauvegardée.</p>
-                )}
-              </div>
-            </details>
-            <span className="private-label">
-              <ShieldCheck size={14} /> Espace privé
-            </span>
-            <button className="button secondary compact" onClick={newMission}>
-              <Plus size={15} /> Nouvelle mission
+        <div className="so-journey" aria-label="Le parcours">
+          <span className={!run ? "current" : "done"}>
+            <b>{run ? <Check size={14} /> : "1"}</b>Choisis ton contenu
+          </span>
+          <ArrowRight size={17} />
+          <span
+            className={
+              run && !["completed", "cancelled"].includes(run.status)
+                ? "current"
+                : run?.status === "completed"
+                  ? "done"
+                  : ""
+            }
+          >
+            <b>2</b>Regarde l’équipe travailler
+          </span>
+          <ArrowRight size={17} />
+          <span className={run?.status === "completed" ? "current" : ""}>
+            <b>3</b>Lis ton diagnostic
+          </span>
+        </div>
+        {error && (
+          <div className="so-alert" role="alert">
+            <span>{error}</span>
+            <button
+              className="so-icon"
+              aria-label="Fermer le message"
+              onClick={() => setError("")}
+            >
+              <X size={18} />
             </button>
           </div>
-        </header>
-        <main className="main-content">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <Radio size={14} /> AGENT OBSERVATORY
-              </div>
-              <h1>
-                {tab === "mission"
-                  ? "Voir les agents à l’œuvre."
-                  : tab === "traces"
-                    ? "Rien ne reste dans l’ombre."
-                    : tab === "artifacts"
-                      ? "Du travail. Des résultats."
-                      : tab === "compare"
-                        ? "Comparer les exécutions."
-                        : "Sous le capot."}
-              </h1>
-              <p>
-                {tab === "mission"
-                  ? "Suivez une mission, inspectez les preuves, gardez le contrôle."
-                  : tab === "traces"
-                    ? "Les appels d’outils, leurs entrées et leurs résultats, dans l’ordre."
-                    : tab === "artifacts"
-                      ? "Le rapport et les traces produits par votre mission."
-                      : tab === "compare"
-                        ? "Des mesures observées, sans score de qualité inventé."
-                        : "Un runtime observable, des étapes bornées et une reprise explicite."}
-              </p>
-            </div>
-            <div className="heading-number">
-              LAB<span>001</span>
-            </div>
-          </div>
-          {error && (
-            <div className="error-banner" role="alert">
-              <span>{error}</span>
-              <button onClick={() => setError("")} aria-label="Fermer l’erreur">
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {loading && (
-            <div className="loading-line" role="status">
-              <Loader2 size={16} className="spin" /> Chargement des missions
-              sauvegardées…
-            </div>
-          )}
-          {connectionLost && run && (
-            <div className="connection-banner" role="status">
-              <Radio size={17} />
-              Connexion interrompue. L’état affiché est le dernier état reçu ;
-              l’actualisation reprend automatiquement.
-            </div>
-          )}
-          {tab === "mission" && (
-            <>
-              <section className="mission-panel">
-                <div className="section-title">
-                  <span className="section-index">01</span>
-                  <h2>{run ? "Mission active" : "Votre prochaine mission"}</h2>
-                  <ModeBadge mode={run?.mode || mode} />
+        )}
+        {offline && (
+          <p className="so-alert" role="status">
+            Connexion interrompue. Le dernier état reçu reste visible ;
+            l’actualisation reprend automatiquement.
+          </p>
+        )}
+        <div className="so-workspace">
+          <section className="so-task">
+            {!run ? (
+              <>
+                <span className="so-eyebrow">01 / LE CONTENU</span>
+                <h2>Que veux-tu analyser ?</h2>
+                <p className="so-task-copy">
+                  Commence par un exemple, ou apporte ton propre contenu.
+                </p>
+                <div
+                  className="so-input-tabs"
+                  role="group"
+                  aria-label="Type de contenu"
+                >
+                  <button
+                    aria-pressed={kind === "example"}
+                    onClick={() => setKind("example")}
+                  >
+                    <Sparkles size={16} /> Exemple
+                  </button>
+                  <button
+                    aria-pressed={kind === "repository"}
+                    onClick={() => setKind("repository")}
+                  >
+                    <GitBranch size={16} /> GitHub
+                  </button>
+                  <button
+                    aria-pressed={kind === "documents"}
+                    onClick={() => setKind("documents")}
+                  >
+                    <FileText size={16} /> Texte
+                  </button>
                 </div>
-                {run ? (
-                  <>
-                    <div className="active-mission">
-                      <div>
-                        <h3>{run.title}</h3>
-                        <p>{run.objective}</p>
-                      </div>
-                      <span className={`status-tag ${run.status}`}>
-                        {STATUS_LABEL[run.status]}
-                      </span>
-                    </div>
-                    <div className="mission-controls">
-                      <div className="mission-progress">
-                        <div className="progress-bar">
-                          <span style={{ width: `${progress}%` }} />
-                        </div>
-                        <span>
-                          {run.cursor}/7 étapes <strong>{progress}%</strong>
-                        </span>
-                      </div>
-                      <div className="control-buttons">
-                        {run.status === "running" && (
-                          <>
-                            <button
-                              className="button secondary"
-                              disabled={busy}
-                              onClick={() => void action("pause")}
-                            >
-                              <Pause size={15} /> Pause
-                            </button>
-                            <button
-                              className={`button subtle ${auto ? "on" : ""}`}
-                              onClick={() => setAuto(!auto)}
-                              aria-pressed={auto}
-                            >
-                              <Zap size={15} /> Auto{" "}
-                              {auto ? "activé" : "désactivé"}
-                            </button>
-                            {!auto && (
-                              <button
-                                className="button primary"
-                                disabled={advancing || busy}
-                                onClick={() => void advance(run.id)}
-                              >
-                                <Play size={15} /> Étape suivante
-                              </button>
-                            )}
-                          </>
-                        )}
-                        {(run.status === "paused" ||
-                          run.status === "failed") && (
-                          <button
-                            className="button primary"
-                            disabled={busy}
-                            onClick={() => void action("resume")}
-                          >
-                            <Play size={15} /> Reprendre
-                          </button>
-                        )}
-                        {run.status === "completed" && (
-                          <button
-                            className="button primary"
-                            onClick={() => setTab("artifacts")}
-                          >
-                            <FileText size={15} /> Voir le rapport
-                          </button>
-                        )}
-                        {[
-                          "completed",
-                          "cancelled",
-                          "paused",
-                          "failed",
-                        ].includes(run.status) && (
-                          <button
-                            className="button secondary"
-                            onClick={duplicateMission}
-                            disabled={busy}
-                          >
-                            <RotateCcw size={15} /> Réutiliser la mission
-                          </button>
-                        )}
-                        {!["completed", "cancelled"].includes(run.status) && (
-                          <button
-                            className="icon-button"
-                            disabled={busy}
-                            onClick={() => void action("cancel")}
-                            aria-label="Annuler la mission"
-                            title="Annuler la mission"
-                          >
-                            <Square size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <MissionBriefing
-                      run={run}
-                      auto={auto}
-                      advancing={advancing}
-                    />
-                    {run.error && <p className="inline-error">{run.error}</p>}
-                    {run.status === "waiting" && (
-                      <div className="approval-banner">
-                        <ShieldCheck size={23} />
-                        <div>
-                          <strong>
-                            Le contrôle est terminé. À vous de décider.
-                          </strong>
-                          <p>
-                            Inspectez les constats et leurs sources, puis
-                            autorisez la rédaction du rapport.
-                          </p>
-                        </div>
-                        <button
-                          className="button secondary"
-                          onClick={() => {
-                            setReplay(-1);
-                            requestAnimationFrame(() => {
-                              const panel =
-                                document.getElementById("mission-findings");
-                              panel?.focus({ preventScroll: true });
-                              panel?.scrollIntoView({
-                                behavior: window.matchMedia(
-                                  "(prefers-reduced-motion: reduce)",
-                                ).matches
-                                  ? "instant"
-                                  : "smooth",
-                                block: "start",
-                              });
-                            });
-                          }}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void launch();
+                  }}
+                >
+                  {kind === "example" ? (
+                    <div className="so-example-options">
+                      {[
+                        {
+                          id: "architecture",
+                          name: "Un projet d’agent IA",
+                          text: "Peut-il reprendre après une panne ? Quelles sont ses limites ?",
+                          icon: Orbit,
+                        },
+                        {
+                          id: "security",
+                          name: "Un assistant d’entreprise",
+                          text: "Ses accès et ses actions sont-ils bien encadrés ?",
+                          icon: ShieldCheck,
+                        },
+                      ].map((item) => (
+                        <label
+                          key={item.id}
+                          className={example === item.id ? "chosen" : ""}
                         >
-                          <Search size={16} /> Relire les constats
-                        </button>
-                        <button
-                          className="button primary"
-                          disabled={busy}
-                          onClick={() => void action("approve")}
-                        >
-                          <Check size={16} /> Valider et poursuivre
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="scenario-picker">
-                      {SCENARIOS.map((s) => (
-                        <button
-                          key={s.id}
-                          className={scenario === s.id ? "selected" : ""}
-                          onClick={() => chooseScenario(s.id)}
-                        >
+                          <input
+                            type="radio"
+                            name="example"
+                            value={item.id}
+                            checked={example === item.id}
+                            onChange={() => setExample(item.id)}
+                          />
+                          <item.icon size={23} />
                           <span>
-                            {s.id === "repository" ? (
-                              <GitBranch size={17} />
-                            ) : s.id === "security" ? (
-                              <ShieldCheck size={17} />
-                            ) : s.id === "documents" ? (
-                              <FileText size={17} />
-                            ) : (
-                              <Layers3 size={17} />
-                            )}
+                            <strong>{item.name}</strong>
+                            <small>{item.text}</small>
                           </span>
-                          <strong>{s.title}</strong>
-                          <p>{s.description}</p>
-                        </button>
+                          <Check size={16} className="so-choice-check" />
+                        </label>
                       ))}
+                      <p className="so-fixture-note">
+                        Exemples fictifs fournis avec l’app. Aucun compte
+                        requis.
+                      </p>
                     </div>
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void launch();
-                      }}
-                    >
-                      <div className="mission-form-row">
-                        <label className="objective-label">
-                          OBJECTIF
-                          <input
-                            value={objective}
-                            onChange={(e) => setObjective(e.target.value)}
-                            minLength={12}
-                            maxLength={2000}
-                            required
-                            placeholder="Décrivez le résultat à produire"
-                          />
-                        </label>
-                        <button
-                          className="button primary launch-button"
-                          disabled={busy || loading}
-                        >
-                          {busy ? (
-                            <Loader2 size={17} className="spin" />
-                          ) : (
-                            <Play size={17} />
-                          )}{" "}
-                          Lancer la mission
-                        </button>
-                      </div>
-                      {scenario === "repository" && (
-                        <label className="extra-field">
-                          Dépôt public GitHub
-                          <input
-                            value={repository}
-                            onChange={(e) => setRepository(e.target.value)}
-                            placeholder="propriétaire/dépôt"
-                            required
-                          />
-                        </label>
-                      )}
-                      {scenario === "documents" && (
-                        <label className="extra-field">
-                          Document à analyser
-                          <textarea
-                            value={documentText}
-                            onChange={(e) => setDocumentText(e.target.value)}
-                            minLength={40}
-                            maxLength={40000}
-                            rows={5}
-                            placeholder="Collez votre document, votre architecture ou votre spécification."
-                            required
-                          />
-                        </label>
-                      )}
-                      <div className="form-footer">
-                        <span>
-                          <ShieldCheck size={13} /> Lecture seule · validation
-                          avant le rapport
-                        </span>
-                        <label>
-                          Exécution
-                          <select
-                            value={mode}
-                            onChange={(e) =>
-                              setMode(e.target.value as Run["mode"])
-                            }
-                          >
-                            <option value="demo">
-                              Démo déterministe · sans clé
-                            </option>
-                            <option value="live" disabled={!liveEnabled}>
-                              IA réelle{" "}
-                              {liveEnabled ? `· ${model}` : "· non configurée"}
-                            </option>
-                          </select>
-                        </label>
-                      </div>
-                    </form>
-                  </>
-                )}
-              </section>
-              <div className="laboratory-layout">
-                <div className="laboratory-main">
-                  <section className="agent-stage">
-                    <div className="stage-header">
-                      <div>
-                        <span className="section-index">02</span>
-                        <h2>L’équipe en action</h2>
-                      </div>
-                      <span className="stage-state">
-                        {replay >= 0 ? (
-                          <>
-                            <History size={13} /> RELECTURE / ÉTAPE {replay + 1}
-                          </>
-                        ) : advancing ? (
-                          <>
-                            <Loader2 size={13} className="spin" /> ÉTAPE EN
-                            COURS
-                          </>
-                        ) : (
-                          <>
-                            <Activity size={13} />{" "}
-                            {run ? "MISSION OBSERVÉE" : "PRÊTE À DÉMARRER"}
-                          </>
-                        )}
-                      </span>
-                    </div>
-                    <div className="stage-grid-background" aria-hidden="true" />
-                    <div className="agent-grid">
-                      {AGENTS.map((a, index) => {
-                        const active =
-                          replay >= 0
-                            ? PHASES[Math.min(replay, 6)].agent === a.id
-                            : activeAgent === a.id;
-                        const done = run?.status === "completed" && replay < 0;
-                        const paused =
-                          (run?.status === "paused" ||
-                            run?.status === "cancelled") &&
-                          replay < 0;
-                        const waiting =
-                          run?.status === "waiting" &&
-                          a.id === "reviewer" &&
-                          replay < 0;
-                        const anim = paused
-                          ? "sleeping"
-                          : done
-                            ? "idle"
-                            : waiting
-                              ? "listening"
-                              : active
-                                ? a.animation
-                                : "idle";
-                        const name = customName(a.id);
-                        return (
-                          <button
-                            key={a.id}
-                            onClick={() => {
-                              setSelectedAgent(a.id);
-                              setSelectedTrace(null);
-                            }}
-                            className={`agent-station ${selectedAgent === a.id ? "selected" : ""} ${active ? "working" : ""}`}
-                            style={
-                              { "--agent-color": a.color } as CSSProperties
-                            }
-                            aria-pressed={selectedAgent === a.id}
-                          >
-                            <div className="station-number">
-                              0{index + 1}
-                              <span>
-                                {active
-                                  ? "ACTIF"
-                                  : waiting
-                                    ? "ATTENTE"
-                                    : done
-                                      ? "TERMINÉ"
-                                      : "EN VEILLE"}
-                              </span>
-                            </div>
-                            <div className="avatar-platform">
-                              <div className="avatar-halo" />
-                              <AgentAvatar
-                                name={name}
-                                animation={anim}
-                                size={150}
-                              />
-                              <div className="platform-ring" />
-                            </div>
-                            <h3>{name}</h3>
-                            <p>{a.role}</p>
-                            <div className="station-tool">
-                              <span className={active ? "active-dot" : ""} />
-                              {active && run
-                                ? PHASES[Math.min(phaseIndex, 6)].tool
-                                : a.tools[0]}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mission-bus">
-                      <span className="bus-node" />
-                      <span>CONTEXTE PARTAGÉ</span>
-                      <div />
-                      <span>{displayedSources.length} sources</span>
-                      <span>{displayedFindings.length} constats</span>
-                      <span>{visibleTraces.length} traces</span>
-                    </div>
-                    <p className="stage-footnote">
-                      Les personnages représentent les rôles du même pipeline.
-                      Cliquez pour inspecter leur travail.
-                    </p>
-                  </section>
-                  <section className="pipeline-panel">
-                    <div className="section-title">
-                      <span className="section-index">03</span>
-                      <h2>Le chemin de la mission</h2>
-                      <span className="checkpoint-label">
-                        <Layers3 size={13} /> Checkpoint après chaque étape
-                      </span>
-                    </div>
-                    <div className="pipeline">
-                      {PHASES.map((p, i) => {
-                        const completed =
-                          run && (replay >= 0 ? replay + 1 : run.cursor) > i;
-                        const current = run && phaseIndex === i;
-                        return (
-                          <button
-                            key={p.name}
-                            className={`${completed ? "done" : ""} ${current ? "current" : ""} ${i === 4 ? "gate" : ""}`}
-                            onClick={() => {
-                              setSelectedAgent(p.agent);
-                              const t = run?.traces.find((t) => t.phase === i);
-                              setSelectedTrace(t?.id || null);
-                              if (t) setReplay(i);
-                            }}
-                            title={p.description}
-                          >
-                            <span>
-                              {completed ? (
-                                <Check size={14} />
-                              ) : i === 4 ? (
-                                <ShieldCheck size={14} />
-                              ) : (
-                                String(i + 1).padStart(2, "0")
-                              )}
-                            </span>
-                            <strong>{p.name}</strong>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {run && run.traces.length > 0 && (
-                      <div className="replay-control">
-                        <History size={15} />
-                        <span>Relecture</span>
-                        <input
-                          aria-label="Relire une étape terminée"
-                          type="range"
-                          min={0}
-                          max={Math.max(...run.traces.map((t) => t.phase))}
-                          value={
-                            replay >= 0
-                              ? replay
-                              : Math.max(...run.traces.map((t) => t.phase))
-                          }
-                          onChange={(e) => setReplay(Number(e.target.value))}
-                        />
-                        <button
-                          onClick={() => {
-                            setReplay(-1);
-                            setSelectedTrace(null);
-                          }}
-                        >
-                          Retour à la mission
-                        </button>
-                      </div>
-                    )}
-                  </section>
-                  <section className="activity-panel">
-                    <div className="section-title">
-                      <span className="section-index">04</span>
-                      <h2>Dernières traces</h2>
-                      <button
-                        className="text-button"
-                        onClick={() => setTab("traces")}
-                      >
-                        Tout voir <Terminal size={14} />
-                      </button>
-                    </div>
-                    {visibleTraces.length ? (
-                      visibleTraces.slice(-3).reverse().map(traceRow)
-                    ) : (
-                      <div className="empty-traces">
-                        <Terminal size={21} />
-                        <p>Chaque étape laissera une trace inspectable ici.</p>
-                      </div>
-                    )}
-                  </section>
-                  {displayedFindings.length > 0 && (
-                    <FindingsPanel
-                      key={run?.id}
-                      findings={displayedFindings}
-                      sources={displayedSources}
-                      reviewing={run?.status === "waiting"}
-                      onSource={(selected, trigger) => {
-                        sourceTrigger.current = trigger;
-                        setSource(selected);
-                      }}
-                    />
-                  )}
-                </div>
-                <aside className="inspector">
-                  <div className="inspector-header">
-                    <span>INSPECTEUR</span>
-                    <Code2 size={15} />
-                  </div>
-                  <div className="inspector-agent">
-                    <span style={{ background: agent.color }} />
-                    <div>
-                      <strong>{customName(agent.id)}</strong>
-                      <p>{agent.role}</p>
-                    </div>
-                    <select
-                      aria-label="Personnage de ce rôle"
-                      value={customName(agent.id)}
-                      onChange={(e) => customize(e.target.value)}
-                    >
-                      {AVATAR_NAMES.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <p className="agent-description">{agent.description}</p>
-                  <div className="inspector-tools">
-                    {agent.tools.map((t) => (
-                      <code key={t}>{t}</code>
-                    ))}
-                  </div>
-                  <div className="inspector-divider" />
-                  <div className="inspector-label">
-                    {trace ? "TRACE SÉLECTIONNÉE" : "CE QUI SERA OBSERVABLE"}
-                  </div>
-                  {trace ? (
-                    <>
-                      <h3 className="trace-title">{trace.tool}</h3>
-                      <p className="trace-summary">{trace.summary}</p>
-                      <div className="trace-metadata">
-                        <span>
-                          <Clock3 size={13} />
-                          {duration(trace.durationMs)}
-                        </span>
-                        <span>{trace.tokens.toLocaleString("fr")} tokens</span>
-                      </div>
-                      <details open>
-                        <summary>Entrée de l’outil</summary>
-                        <pre>{JSON.stringify(trace.input, null, 2)}</pre>
-                      </details>
-                      <details>
-                        <summary>Sortie de l’outil</summary>
-                        <pre>{JSON.stringify(trace.output, null, 2)}</pre>
-                      </details>
-                      <span className="checkpoint-saved">
-                        <CheckCheck size={14} /> Étape sauvegardée
-                      </span>
-                    </>
+                  ) : kind === "repository" ? (
+                    <label className="so-field">
+                      Lien du dépôt public
+                      <input
+                        value={repository}
+                        onChange={(event) => setRepository(event.target.value)}
+                        placeholder="https://github.com/proprietaire/projet"
+                        maxLength={180}
+                        required
+                      />
+                      <small>
+                        L’équipe lit les documents et configurations. Elle
+                        n’exécute pas le code.
+                      </small>
+                    </label>
                   ) : (
-                    <div className="inspector-explanation">
-                      <p>
-                        <span>01</span> Les données transmises à l’outil.
-                      </p>
-                      <p>
-                        <span>02</span> Le résultat réellement retourné.
-                      </p>
-                      <p>
-                        <span>03</span> La durée et les tokens mesurés.
-                      </p>
-                      <p>
-                        <span>04</span> Le checkpoint permettant la reprise.
-                      </p>
-                    </div>
+                    <label className="so-field">
+                      Ton document
+                      <textarea
+                        rows={7}
+                        value={documentText}
+                        onChange={(event) =>
+                          setDocumentText(event.target.value)
+                        }
+                        placeholder="Colle une spécification, une description d’architecture ou un document de projet…"
+                        minLength={40}
+                        maxLength={40000}
+                        required
+                      />
+                      <small>
+                        {documentText.length.toLocaleString("fr")} / 40 000
+                        caractères · 40 minimum
+                      </small>
+                    </label>
                   )}
-                  <div className="inspector-divider" />
-                  <div className="inspector-label">
-                    SOURCES DE LA MISSION <span>{displayedSources.length}</span>
-                  </div>
-                  <div className="source-list">
-                    {displayedSources.map((s) => (
-                      <button
-                        key={s.id}
-                        onClick={(e) => {
-                          sourceTrigger.current = e.currentTarget;
-                          setSource(s);
-                        }}
+                  <details className="so-options">
+                    <summary>
+                      <Settings2 size={16} /> Adapter l’analyse{" "}
+                      <ChevronDown size={15} />
+                    </summary>
+                    <label className="so-field">
+                      Ce que tu veux vérifier
+                      <input
+                        value={objective}
+                        onChange={(event) => setObjective(event.target.value)}
+                        minLength={12}
+                        maxLength={2000}
+                        placeholder="Laisse vide pour utiliser l’objectif proposé"
+                      />
+                    </label>
+                    <label className="so-field">
+                      Mode d’analyse
+                      <select
+                        value={mode}
+                        onChange={(event) =>
+                          setMode(event.target.value as Run["mode"])
+                        }
                       >
-                        <FileText size={14} />
-                        <span>{s.name}</span>
-                        <code>{s.id}</code>
-                      </button>
-                    ))}
-                    {!displayedSources.length && (
-                      <p>Les documents apparaîtront après la collecte.</p>
-                    )}
-                  </div>
-                  {run && displayedChecks.length > 0 && (
-                    <div className="checks-list">
-                      <div className="inspector-label">
-                        CONTRÔLES STRUCTURELS
+                        <option value="demo">Démo, sans modèle IA</option>
+                        <option value="live" disabled={!liveEnabled}>
+                          IA connectée{" "}
+                          {liveEnabled ? `· ${model}` : "· non configurée"}
+                        </option>
+                      </select>
+                    </label>
+                  </details>
+                  <button
+                    className="so-button primary so-launch"
+                    disabled={busy || loading}
+                  >
+                    {busy || loading ? (
+                      <Loader2 size={19} className="spin" />
+                    ) : (
+                      <Play size={19} />
+                    )}{" "}
+                    {loading
+                      ? "Chargement…"
+                      : busy
+                        ? "Lancement…"
+                        : "Lancer l’analyse"}
+                    <ArrowRight size={19} />
+                  </button>
+                  <p className="so-mode-note">
+                    {mode === "demo"
+                      ? "Mode démo : de vraies étapes et des règles documentaires, sans appel à un modèle IA."
+                      : `Mode IA : l’analyse appelle ${model}. Les tokens utilisés sont enregistrés.`}
+                  </p>
+                </form>
+              </>
+            ) : (
+              <>
+                <span className="so-eyebrow">TON ANALYSE</span>
+                <h2 className="so-run-title">
+                  {run.scenario === "architecture"
+                    ? "Un projet d’agent IA"
+                    : run.scenario === "security"
+                      ? "Un assistant d’entreprise"
+                      : run.scenario === "repository"
+                        ? run.repository
+                        : "Ton document"}
+                </h2>
+                <p className="so-task-copy">{run.objective}</p>
+                <span className={`so-status status-${run.status}`}>
+                  {STATUS_LABEL[run.status]}
+                </span>
+                <ol className="so-steps">
+                  {STEP_NAMES.map((name, index) => (
+                    <li
+                      key={name}
+                      className={
+                        index < run.cursor
+                          ? "done"
+                          : index === activeStep && run.status !== "completed"
+                            ? "current"
+                            : ""
+                      }
+                    >
+                      <span>
+                        {index < run.cursor ? <Check size={14} /> : index + 1}
+                      </span>
+                      <div>
+                        <strong>{name}</strong>
+                        {index === activeStep && running && (
+                          <small>
+                            {stepping === run.id
+                              ? "En cours…"
+                              : "Prochaine étape"}
+                          </small>
+                        )}
                       </div>
-                      {displayedChecks.map((c) => (
-                        <div key={c.name} title={c.detail}>
-                          <span
-                            className={c.passed ? "check-pass" : "check-fail"}
-                          >
-                            {c.passed ? <Check size={13} /> : <X size={13} />}
-                          </span>
-                          <span>{c.name}</span>
-                        </div>
-                      ))}
-                    </div>
+                    </li>
+                  ))}
+                </ol>
+                {run.error && <p className="so-inline-error">{run.error}</p>}
+                <div className="so-run-buttons">
+                  {running && (
+                    <button
+                      className="so-button quiet"
+                      disabled={busy}
+                      onClick={() => void act("pause")}
+                    >
+                      <Pause size={17} /> Mettre en pause
+                    </button>
                   )}
-                </aside>
+                  {["paused", "failed"].includes(run.status) && (
+                    <button
+                      className="so-button primary"
+                      disabled={busy}
+                      onClick={() => void act("resume")}
+                    >
+                      <Play size={17} /> Reprendre
+                    </button>
+                  )}
+                  {run.findings.length > 0 && (
+                    <button className="so-button quiet" onClick={showResults}>
+                      <FileText size={17} /> Voir les constats
+                    </button>
+                  )}
+                  {!["completed", "cancelled"].includes(run.status) && (
+                    <button
+                      className="so-button stop"
+                      disabled={busy}
+                      onClick={() => void act("cancel")}
+                    >
+                      <Square size={14} /> Arrêter
+                    </button>
+                  )}
+                  {["completed", "cancelled", "paused", "failed"].includes(
+                    run.status,
+                  ) && (
+                    <button className="so-button quiet" onClick={reuse}>
+                      <Plus size={16} /> Réutiliser ce contenu
+                    </button>
+                  )}
+                </div>
+                <p className="so-mode-note">
+                  {run.mode === "demo"
+                    ? "Démo sans modèle IA. Les constats proviennent de règles documentaires."
+                    : `Analyse IA · ${run.model || model}`}{" "}
+                  {running && "Garde cette page ouverte pendant l’analyse."}
+                </p>
+              </>
+            )}
+          </section>
+          <div
+            ref={stage}
+            className={`so-stage-column ${run ? "has-mission" : ""}`}
+          >
+            <Team
+              run={run}
+              busy={stepping === run?.id}
+              selected={selected}
+              setSelected={setSelected}
+              avatars={avatars}
+              onCustomize={customize}
+            />
+            <div className="so-output-preview">
+              {run?.traces.length ? (
+                <>
+                  <span className="so-output-icon">
+                    <CheckCheck size={21} />
+                  </span>
+                  <div>
+                    <small>DERNIÈRE ÉTAPE TERMINÉE</small>
+                    <p key={run.traces.at(-1)!.id}>
+                      {run.traces.at(-1)!.summary}
+                    </p>
+                  </div>
+                  <span className="so-saved">Sauvegardé</span>
+                </>
+              ) : (
+                <>
+                  <span className="so-output-icon">
+                    <FileText size={21} />
+                  </span>
+                  <div>
+                    <small>CE QUE TU OBTIENS</small>
+                    <p>
+                      Des constats à relire, leurs documents d’origine et un
+                      rapport téléchargeable.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+            <details className="so-explanation">
+              <summary>
+                <Orbit size={17} /> À quoi sert cette app ?{" "}
+                <ChevronDown size={16} />
+              </summary>
+              <p>
+                Agent Observatory rend une analyse documentaire facile à suivre.
+                Par exemple : repérer les limites décrites dans un projet
+                d’agent IA ou les accès à vérifier dans une spécification.
+              </p>
+              <p>
+                Les personnages représentent quatre rôles d’un même processus :
+                organiser, lire, analyser et vérifier. Ils montrent où en est le
+                travail. Ils ne sont pas quatre modèles indépendants.
+              </p>
+              <p>
+                En démo, des règles cherchent des mentions de reprise, de
+                droits, de tests ou de validation. Le mode IA utilise un modèle
+                configuré côté serveur. Tu relis les constats avant d’autoriser
+                le rapport.
+              </p>
+            </details>
+          </div>
+        </div>
+        {run && run.findings.length > 0 && (
+          <section
+            ref={results}
+            className="so-results"
+            tabIndex={-1}
+            aria-labelledby="so-results-title"
+          >
+            <div className="so-results-heading">
+              <div>
+                <span className="so-eyebrow">03 / TON DIAGNOSTIC</span>
+                <h2 id="so-results-title">Voilà ce que l’équipe a trouvé.</h2>
+                <p>Ouvre les sources pour vérifier chaque constat.</p>
               </div>
-              <div className="metrics-strip">
+              <span className="so-result-stamp">
+                <ShieldCheck size={23} />
+                {run.status === "completed" ? "Rapport disponible" : "À relire"}
+              </span>
+            </div>
+            <FindingsPanel
+              key={run.id}
+              findings={run.findings}
+              sources={run.sources}
+              reviewing={run.status === "waiting"}
+              onSource={(value) => setSource(value)}
+            />
+            {run.status === "waiting" && (
+              <div className="so-approval">
+                <AgentAvatar
+                  name={avatars.reviewer || "Beebo"}
+                  animation="listening"
+                  lively
+                  size={80}
+                />
                 <div>
-                  <Clock3 size={17} />
-                  <span>
-                    Temps des outils
-                    <strong>{run ? duration(sumDuration(run)) : "—"}</strong>
-                  </span>
+                  <h3>Tu as relu les constats ?</h3>
+                  <p>
+                    Ton accord permet de les assembler dans le rapport final.
+                  </p>
                 </div>
-                <div>
-                  <Layers3 size={17} />
-                  <span>
-                    Checkpoints<strong>{run?.traces.length || 0}</strong>
-                  </span>
-                </div>
-                <div>
-                  <Sparkles size={17} />
-                  <span>
-                    Tokens mesurés
-                    <strong>
-                      {run
-                        ? (run.inputTokens + run.outputTokens).toLocaleString(
-                            "fr",
-                          )
-                        : 0}
-                    </strong>
-                  </span>
-                </div>
-                <div>
-                  <ShieldCheck size={17} />
-                  <span>
-                    Validation humaine
-                    <strong>
-                      {run?.traces.some((t) => t.tool === "human.approve")
-                        ? "Accord enregistré"
-                        : "Avant le rapport"}
-                    </strong>
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
-          {tab === "traces" && (
-            <section className="full-panel">
-              <div className="section-title">
-                <h2>Journal de la mission</h2>
-                <span>{run?.traces.length || 0} événements</span>
                 <button
-                  className="button secondary compact"
-                  disabled={!run?.traces.length}
+                  className="so-button primary"
+                  disabled={busy}
+                  onClick={() => void act("approve")}
+                >
+                  <Check size={18} /> Créer le rapport
+                </button>
+              </div>
+            )}
+            {run.report && (
+              <div className="so-report">
+                <div className="so-report-heading">
+                  <div>
+                    <h3>Ton rapport est prêt.</h3>
+                    <p>Garde une copie de l’analyse et des références.</p>
+                  </div>
+                  <button
+                    className="so-button primary"
+                    onClick={() => download("rapport.md", run.report)}
+                  >
+                    <Download size={17} /> Télécharger le rapport
+                  </button>
+                  <button
+                    className="so-button quiet"
+                    aria-expanded={reportOpen}
+                    onClick={() => setReportOpen(!reportOpen)}
+                  >
+                    {reportOpen ? "Masquer" : "Lire ici"}
+                    <ChevronDown size={16} />
+                  </button>
+                </div>
+                {reportOpen && (
+                  <article className="so-report-content">
+                    {run.report
+                      .split("\n")
+                      .map((line, index) =>
+                        line.startsWith("### ") ? (
+                          <h4 key={index}>{line.slice(4)}</h4>
+                        ) : line.startsWith("## ") ? (
+                          <h3 key={index}>{line.slice(3)}</h3>
+                        ) : line.startsWith("# ") ? (
+                          <h2 key={index}>{line.slice(2)}</h2>
+                        ) : line ? (
+                          <p key={index}>{line}</p>
+                        ) : (
+                          <br key={index} />
+                        ),
+                      )}
+                  </article>
+                )}
+              </div>
+            )}
+            <details className="so-explanation so-evidence">
+              <summary>
+                <FileText size={17} /> Documents, contrôles et détails de
+                l’analyse <ChevronDown size={16} />
+              </summary>
+              <div className="so-source-buttons">
+                {run.sources.map((item) => (
+                  <button
+                    key={item.id}
+                    className="so-button quiet"
+                    onClick={() => setSource(item)}
+                  >
+                    <FileText size={15} />
+                    {item.id} · {item.name}
+                  </button>
+                ))}
+              </div>
+              {run.checks.map((item) => (
+                <p key={item.name}>
+                  <strong>
+                    {item.passed ? "✓" : "✕"} {item.name}
+                  </strong>
+                  <br />
+                  {item.detail}
+                </p>
+              ))}
+              <p>
+                {run.inputTokens + run.outputTokens} tokens mesurés ·{" "}
+                {run.traces.length} étapes enregistrées
+              </p>
+              <div className="so-source-buttons">
+                <button
+                  className="so-button quiet"
                   onClick={() =>
-                    run &&
+                    download(
+                      "mission.json",
+                      JSON.stringify(run, null, 2),
+                      "application/json",
+                    )
+                  }
+                >
+                  <Download size={15} /> Exporter la mission
+                </button>
+                <button
+                  className="so-button quiet"
+                  onClick={() =>
                     download(
                       "traces.json",
                       JSON.stringify(run.traces, null, 2),
@@ -1422,429 +1291,35 @@ export default function Observatory() {
                     )
                   }
                 >
-                  <Download size={14} /> Export JSON
+                  <Download size={15} /> Exporter les traces
                 </button>
               </div>
-              <div className="filter-bar">
-                <button
-                  className={traceFilter === "all" ? "selected" : ""}
-                  onClick={() => setTraceFilter("all")}
-                >
-                  Tous les rôles
-                </button>
-                {AGENTS.map((a) => (
-                  <button
-                    className={traceFilter === a.id ? "selected" : ""}
-                    key={a.id}
-                    onClick={() => setTraceFilter(a.id)}
-                  >
-                    {a.role}
-                  </button>
-                ))}
-              </div>
-              {filteredTraces.length ? (
-                filteredTraces.map(traceRow)
-              ) : (
-                <Empty
-                  icon={Terminal}
-                  title="Aucune trace à afficher"
-                  text="Lancez une mission depuis l’observatoire pour inspecter ses étapes."
-                />
-              )}
-              <p className="panel-note">
-                Cliquez sur un événement pour ouvrir ses entrées et ses sorties
-                dans l’inspecteur.
-              </p>
-            </section>
-          )}
-          {tab === "artifacts" && (
-            <>
-              {run?.report ? (
-                <div className="artifact-layout">
-                  <Report text={run.report} />
-                  <aside className="artifact-actions">
-                    <div className="artifact-file">
-                      <FileText size={28} />
-                      <h3>rapport.md</h3>
-                      <p>
-                        {run.report.length.toLocaleString("fr")} caractères ·{" "}
-                        {run.sources.length} sources
-                      </p>
-                      <button
-                        className="button primary"
-                        onClick={() => download("rapport.md", run.report)}
-                      >
-                        <Download size={15} /> Télécharger
-                      </button>
-                    </div>
-                    <div className="artifact-file">
-                      <Terminal size={25} />
-                      <h3>traces.json</h3>
-                      <p>{run.traces.length} événements · entrées et sorties</p>
-                      <button
-                        className="button secondary"
-                        onClick={() =>
-                          download(
-                            "traces.json",
-                            JSON.stringify(run.traces, null, 2),
-                            "application/json",
-                          )
-                        }
-                      >
-                        <Download size={15} /> Exporter les traces
-                      </button>
-                    </div>
-                    <div className="artifact-file">
-                      <Layers3 size={25} />
-                      <h3>mission.json</h3>
-                      <p>État complet et sources de la mission</p>
-                      <button
-                        className="button secondary"
-                        onClick={() =>
-                          download(
-                            "mission.json",
-                            JSON.stringify(run, null, 2),
-                            "application/json",
-                          )
-                        }
-                      >
-                        <Download size={15} /> Exporter la mission
-                      </button>
-                    </div>
-                  </aside>
-                </div>
-              ) : (
-                <section className="full-panel">
-                  <Empty
-                    icon={Archive}
-                    title="Le rapport attend sa mission"
-                    text="Le livrable sera disponible après l’analyse, le contrôle des preuves et votre validation."
-                  />
-                  <button
-                    className="button primary"
-                    onClick={() => setTab("mission")}
-                  >
-                    <Orbit size={15} /> Ouvrir l’observatoire
-                  </button>
-                </section>
-              )}
-            </>
-          )}
-          {tab === "compare" && (
-            <section className="full-panel">
-              <div className="section-title">
-                <h2>Deux missions, des mesures comparables</h2>
-              </div>
-              <label className="compare-picker">
-                Comparer la mission actuelle avec
-                <select
-                  value={compareId}
-                  onChange={(e) => setCompareId(e.target.value)}
-                >
-                  <option value="">Choisir une mission sauvegardée</option>
-                  {history
-                    .filter((h) => h.id !== run?.id)
-                    .map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.title} · {STATUS_LABEL[h.status]}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              {run && compareRun ? (
-                <>
-                  <div className="comparison-heading">
-                    <span>
-                      {run.title}
-                      <ModeBadge mode={run.mode} />
-                    </span>
-                    <span>
-                      {compareRun.title}
-                      <ModeBadge mode={compareRun.mode} />
-                    </span>
-                  </div>
-                  <div className="table-scroll">
-                    <table className="comparison-table">
-                      <thead>
-                        <tr>
-                          <th>Mesure</th>
-                          <th>Mission actuelle</th>
-                          <th>Mission comparée</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          [
-                            "État",
-                            STATUS_LABEL[run.status],
-                            STATUS_LABEL[compareRun.status],
-                          ],
-                          [
-                            "Étapes",
-                            `${run.cursor}/7`,
-                            `${compareRun.cursor}/7`,
-                          ],
-                          [
-                            "Temps des outils",
-                            duration(sumDuration(run)),
-                            duration(sumDuration(compareRun)),
-                          ],
-                          [
-                            "Sources",
-                            run.sources.length,
-                            compareRun.sources.length,
-                          ],
-                          [
-                            "Constats",
-                            run.findings.length,
-                            compareRun.findings.length,
-                          ],
-                          [
-                            "Tokens",
-                            run.inputTokens + run.outputTokens,
-                            compareRun.inputTokens + compareRun.outputTokens,
-                          ],
-                          [
-                            "Contrôles réussis",
-                            `${run.checks.filter((c) => c.passed).length}/${run.checks.length}`,
-                            `${compareRun.checks.filter((c) => c.passed).length}/${compareRun.checks.length}`,
-                          ],
-                          [
-                            "Rapport disponible",
-                            run.report ? "Oui" : "Non",
-                            compareRun.report ? "Oui" : "Non",
-                          ],
-                        ].map((row) => (
-                          <tr key={row[0]}>
-                            {row.map((cell, i) => (
-                              <td key={i}>{cell}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p className="panel-note">
-                    Les durées dépendent du réseau et du fournisseur. La
-                    quantité de constats ne mesure pas leur qualité. Les
-                    scénarios et périmètres peuvent différer.
-                  </p>
-                </>
-              ) : (
-                <Empty
-                  icon={GitBranch}
-                  title="Il faut deux exécutions pour comparer"
-                  text="Lancez deux missions, puis sélectionnez celle à comparer. Les résultats sont conservés côté serveur."
-                />
-              )}
-            </section>
-          )}
-          {tab === "guide" && (
-            <div className="guide-grid">
-              <section className="guide-intro">
-                <span className="eyebrow">RUNTIME / EXPLIQUÉ</span>
-                <h2>
-                  Un agent devient utile
-                  <br />
-                  quand on peut le suivre.
-                </h2>
-                <p>
-                  Observatory décompose une mission en étapes. Chaque rôle
-                  utilise un outil précis, produit une sortie inspectable et
-                  sauvegarde un checkpoint. Vous décidez quand la mission peut
-                  continuer.
-                </p>
-                <div className="guide-avatars">
-                  {AGENTS.map((a) => (
-                    <AgentAvatar
-                      key={a.id}
-                      name={customName(a.id)}
-                      size={94}
-                      animation={a.animation}
-                    />
-                  ))}
-                </div>
-              </section>
-              <section className="guide-card">
-                <span className="guide-number">01 / EXÉCUTION</span>
-                <h3>Un pas, une preuve, un checkpoint.</h3>
-                <p>
-                  Le serveur exécute une étape par requête. Le mode automatique
-                  de la page enchaîne ces requêtes. Fermer l’onglet arrête cet
-                  enchaînement ; une étape déjà lancée peut finir et être
-                  sauvegardée.
-                </p>
-                <p>
-                  En revenant, la mission repart du dernier checkpoint. Un
-                  verrou temporaire et une comparaison de révision empêchent
-                  deux requêtes de sauvegarder simultanément la même étape.
-                </p>
-                <code>
-                  plan → sources → analyse → contrôle → accord → rapport →
-                  évaluation
-                </code>
-              </section>
-              <section className="guide-card">
-                <span className="guide-number">02 / MODÈLES</span>
-                <h3>Deux modes, clairement séparés.</h3>
-                <p>
-                  <strong>Démo déterministe :</strong> des règles documentaires
-                  extraient des constats des sources. Aucun modèle n’est appelé,
-                  aucun token n’est facturé. Les deux scénarios intégrés
-                  utilisent des documents d’exemple.
-                </p>
-                <p>
-                  <strong>IA connectée :</strong> un modèle analyse les sources
-                  et renvoie des constats structurés. La clé API reste côté
-                  serveur. Le modèle, ses tokens et ses erreurs apparaissent
-                  dans la mission.
-                </p>
-                <span className="config-state">
-                  {liveEnabled
-                    ? `IA disponible · ${model}`
-                    : "IA non configurée sur cette instance"}
-                </span>
-              </section>
-              <section className="guide-card">
-                <span className="guide-number">03 / CONTRÔLE</span>
-                <h3>Vous gardez la décision.</h3>
-                <p>
-                  Après l’analyse, le contrôleur vérifie que chaque constat
-                  référence une source existante. La mission attend votre accord
-                  avant de rédiger le rapport. Vous pouvez la mettre en pause ou
-                  l’annuler.
-                </p>
-                <p>
-                  La présence d’une référence ne prouve pas qu’un constat est
-                  correct. Le rapport conserve cette limite. Aucun code du dépôt
-                  et aucune commande système ne sont exécutés.
-                </p>
-                <div className="guide-callout">
-                  <ShieldCheck size={21} /> Des références vérifiées. Une
-                  interprétation à relire.
-                </div>
-              </section>
-              <section className="guide-card">
-                <span className="guide-number">04 / ARCHITECTURE</span>
-                <h3>Des rôles visibles. Un moteur commun.</h3>
-                <p>
-                  Les quatre personnages sont des rôles du pipeline, pas quatre
-                  modèles autonomes en parallèle. Les avatars, leurs formes et
-                  leurs animations viennent du fork synchronisé d’Avatar Lab.
-                </p>
-                <p>
-                  React affiche l’état. Les routes serveur appellent les outils.
-                  D1 conserve les missions, les traces et les checkpoints. La
-                  collecte GitHub lit des blobs épinglés et limite le volume de
-                  sources.
-                </p>
-                <a
-                  href="https://github.com/hemvall/avatar-lab"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Explorer Avatar Lab
-                </a>
-              </section>
-              <section className="guide-card wide">
-                <span className="guide-number">05 / LIMITES DU PROTOTYPE</span>
-                <h3>Ce qui reste à industrialiser.</h3>
-                <p>
-                  L’exécution automatique nécessite une page ouverte. Il n’y a
-                  pas encore de file de tâches autonome ni de garantie «
-                  exactement une fois » pour les appels au modèle. Une panne
-                  après l’appel et avant le checkpoint peut entraîner un nouvel
-                  appel à la reprise. Les contrôles de qualité sont structurels
-                  ; une évaluation métier reste nécessaire.
-                </p>
-                <p>
-                  Les clés se configurent avec <code>OPENAI_API_KEY</code> et{" "}
-                  <code>OPENAI_MODEL</code>. Aucun coût estimé n’est affiché
-                  sans tarif fournisseur configuré. L’historique présente les 50
-                  dernières missions.
-                </p>
-              </section>
-            </div>
-          )}
-          <footer className="main-footer">
-            <span>
-              <Orbit size={14} /> OBSERVATORY
-            </span>
-            <span>Le travail est visible. La décision reste humaine.</span>
-            <button onClick={() => setTab("guide")}>
-              Comprendre le runtime
-            </button>
-          </footer>
-        </main>
-      </div>
-      {source && (
-        <div className="modal-backdrop" onClick={() => setSource(null)}>
-          <section
-            ref={dialogRef}
-            className="source-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Source ${source.name}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header>
-              <div>
-                <code>{source.id}</code>
-                <h2>{source.name}</h2>
-              </div>
-              <button
-                autoFocus
-                className="icon-button"
-                aria-label="Fermer la source"
-                onClick={() => setSource(null)}
-              >
-                <X size={20} />
-              </button>
-            </header>
-            {source.url && (
-              <a href={source.url} target="_blank" rel="noreferrer">
-                Voir le blob d’origine sur GitHub
-              </a>
-            )}
-            {source.truncated && (
-              <p className="panel-note">
-                Extrait limité par le budget de collecte de cette mission.
-              </p>
-            )}
-            <pre>{source.content}</pre>
-            <footer>
-              <span>
-                {source.content.length.toLocaleString("fr")} caractères
-              </span>
-              <button
-                className="button secondary compact"
-                onClick={() =>
-                  download(source.name.replaceAll("/", "-"), source.content)
-                }
-              >
-                <Download size={14} /> Télécharger
-              </button>
-            </footer>
+            </details>
           </section>
+        )}
+      </main>
+      <footer className="so-footer">
+        <span>
+          <Orbit size={16} /> Agent Observatory{" "}
+          <small>Lecture seule. Une aide au diagnostic, à relire.</small>
+        </span>
+        <div>
+          <button onClick={onTechnical}>
+            Vue technique <Settings2 size={15} />
+          </button>
+          <a
+            href="https://github.com/hemvall/Agent-Observatory"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
+          <a href="/api/source">Source · AGPL-3.0</a>
         </div>
+      </footer>
+      {source && (
+        <SourceReader source={source} onClose={() => setSource(null)} />
       )}
-    </div>
-  );
-}
-function Empty({
-  icon: Icon,
-  title,
-  text,
-}: {
-  icon: typeof Orbit;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="empty-state">
-      <Icon size={34} />
-      <h3>{title}</h3>
-      <p>{text}</p>
     </div>
   );
 }

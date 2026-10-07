@@ -10,4 +10,6 @@ Agent Observatory includes source and avatar definitions from Bible Strong Avata
 
 `vendor/avatar-core` and `vendor/avatar-react` preserve upstream source. The React renderer is adapted to apply the fork's shaded body gradient and preserve it during animated frame updates. `lib/avatars/bodyShading.ts` preserves the synchronized fork's gradient calculation. `lib/avatars/catalog.json` contains the 14 character definitions exported with the fork's own validated export API.
 
+The simple interface uses Avatar Lab's existing expression timelines. `lib/avatars/motion.ts` shortens holds and transitions for a livelier presentation, preserving original poses and character definitions. CSS adds floating, task props, breathing and completion celebrations. Reduced-motion preferences disable decorative movement.
+
 The rest of the application implements a new mission runtime and interface under the same license. Names of third-party characters are retained from the supplied library; no affiliation with their respective brands is claimed.

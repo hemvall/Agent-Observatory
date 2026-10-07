@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./observatory.css";
 
 export const metadata: Metadata = {
   title: "Agent Observatory",
   description:
-    "Le laboratoire visuel des agents IA : missions, outils, checkpoints et preuves.",
+    "Analysez un document ou un dépôt GitHub avec une équipe de personnages animés. Comprenez les points à améliorer et obtenez un rapport avec ses sources.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

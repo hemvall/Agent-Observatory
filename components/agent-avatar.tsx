@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Avatar } from "@bible-strong/avatar-react";
 import type { AvatarDefinition } from "@bible-strong/avatar-core";
+import { livelyDefinition } from "@/lib/avatars/motion";
 import catalog from "@/lib/avatars/index.json";
 import "@/vendor/avatar-react/styles.css";
 import definition0 from "@/lib/avatars/definitions/0.json";
@@ -36,10 +37,12 @@ export function AgentAvatar({
   name,
   animation = "idle",
   size = 150,
+  lively = false,
 }: {
   name: string;
   animation?: string;
   size?: number;
+  lively?: boolean;
 }) {
   const safeName = AVATAR_NAMES.includes(name) ? name : "Strobi";
   const [loaded, setLoaded] = useState<{
@@ -49,6 +52,10 @@ export function AgentAvatar({
   const [failed, setFailed] = useState(false);
   const definition =
     cache[safeName] || (loaded?.name === safeName ? loaded.definition : null);
+  const animatedDefinition = useMemo(() => {
+    if (!definition || !lively) return definition;
+    return livelyDefinition(definition);
+  }, [definition, lively]);
   useEffect(() => {
     let active = true;
     setFailed(false);
@@ -83,7 +90,7 @@ export function AgentAvatar({
     );
   return (
     <Avatar
-      definition={definition}
+      definition={animatedDefinition!}
       animation={animation}
       size={size}
       ariaLabel={`${safeName}, ${animation}`}
